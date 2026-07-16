@@ -1,0 +1,15 @@
+{
+  "name": "pixelperfectsnapshot-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/client",
+    "viewer"
+  ],
+  "scripts": {
+    "lint": "npm run lint --workspaces",
+    "test": "npm test --workspaces"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

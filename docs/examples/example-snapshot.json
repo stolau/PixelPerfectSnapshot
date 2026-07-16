@@ -1,0 +1,12 @@
+{
+  "formatVersion": 0,
+  "name": "example-page",
+  "viewport": { "width": 1280, "height": 720 },
+  "html": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Example</title><link rel=\"stylesheet\" href=\"http://localhost:3000/styles/main.css\"></head><body><h1>Hello</h1><img src=\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==\" alt=\"dot\"></body></html>",
+  "stylesheets": [
+    {
+      "href": "http://localhost:3000/styles/main.css",
+      "content": "h1 { color: rgb(20, 20, 60); font-family: sans-serif; }"
+    }
+  ]
+}

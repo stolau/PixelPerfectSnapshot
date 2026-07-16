@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/stolau/PixelPerfectSnapshot/main/docs/snapshot.schema.json",
+  "title": "PixelPerfectSnapshot snapshot (format v0)",
+  "type": "object",
+  "required": ["formatVersion", "name", "viewport", "html", "stylesheets"],
+  "additionalProperties": false,
+  "properties": {
+    "formatVersion": {
+      "const": 0
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "viewport": {
+      "type": "object",
+      "required": ["width", "height"],
+      "additionalProperties": false,
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "html": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stylesheets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["href", "content"],
+        "additionalProperties": false,
+        "properties": {
+          "href": { "type": ["string", "null"] },
+          "content": { "type": "string" }
+        }
+      }
+    }
+  }
+}
