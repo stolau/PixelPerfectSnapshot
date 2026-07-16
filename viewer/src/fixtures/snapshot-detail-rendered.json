@@ -1,0 +1,8 @@
+{
+  "name": "checkout-page",
+  "viewport": {"width": 1280, "height": 720},
+  "status": "fail",
+  "baselineUrl": "/api/runs/run-1/snapshots/checkout-page/images/baseline",
+  "candidateUrl": "/api/runs/run-1/snapshots/checkout-page/images/candidate",
+  "diffUrl": "/api/runs/run-1/snapshots/checkout-page/images/diff"
+}
