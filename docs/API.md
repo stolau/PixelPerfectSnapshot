@@ -31,11 +31,27 @@ Upload one snapshot. Body: a snapshot document, validated against
 `400` → `{"error": "<schema violation message>"}` · `404` unknown run · `409` duplicate name in run.
 
 ### `GET /api/runs`
-`200` → `{"runs": [{"id", "createdAt", "snapshotCount"}]}` — newest first.
+`200` — newest first (creation order descending; timestamp ties broken by creation order):
+```json
+{
+  "runs": [
+    {"id": "run-2", "createdAt": "2026-07-15T09:30:00Z", "snapshotCount": 3},
+    {"id": "run-1", "createdAt": "2026-07-14T18:00:00Z", "snapshotCount": 1}
+  ]
+}
+```
 
 ### `GET /api/runs/<run_id>`
-`200` → `{"id", "createdAt", "snapshots": [{"name", "viewport", "status"}]}` (document order:
-upload order). `404` unknown run.
+`200` (snapshots in upload order) · `404` unknown run:
+```json
+{
+  "id": "run-2",
+  "createdAt": "2026-07-15T09:30:00Z",
+  "snapshots": [
+    {"name": "checkout-page", "viewport": {"width": 1280, "height": 720}, "status": "pending"}
+  ]
+}
+```
 
 ### `GET /api/runs/<run_id>/snapshots/<name>`
 `200` →
@@ -49,8 +65,9 @@ upload order). `404` unknown run.
   "diffUrl": null
 }
 ```
-The three URLs point at the image endpoints below once the corresponding PNG exists; `null` until
-then. `404` unknown run or name.
+The three URLs are **server-relative paths** (e.g.
+`/api/runs/run-2/snapshots/checkout-page/images/baseline`) pointing at the image endpoints below
+once the corresponding PNG exists; `null` until then. `404` unknown run or name.
 
 ### `GET /api/runs/<run_id>/snapshots/<name>/images/<kind>`
 `kind` ∈ `baseline` | `candidate` | `diff`. `200` → `image/png`. `404` while the image does not

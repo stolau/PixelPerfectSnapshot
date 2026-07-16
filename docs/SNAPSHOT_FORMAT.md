@@ -12,7 +12,7 @@ re-renderable in a headless browser with no network access to the captured origi
 | Field | Type | Meaning |
 |---|---|---|
 | `formatVersion` | `0` (const) | Format version of this document. |
-| `name` | string | Snapshot name chosen by the test author, e.g. `"checkout-page"`. Identifies the snapshot within a run. Baselines are keyed by **(name, viewport)**. |
+| `name` | string | Snapshot name chosen by the test author, e.g. `"checkout-page"`. Identifies the snapshot within a run. Must not contain `/` (names appear as URL path segments, see [API.md](API.md)). Baselines are keyed by **(name, viewport)**. |
 | `viewport` | `{width, height}` | CSS-pixel viewport size at capture time. Re-rendering uses exactly this viewport. |
 | `html` | string | The serialized DOM: doctype plus `documentElement.outerHTML` at capture time. All same-origin asset references (`img src`, CSS `url(...)` in inline styles, `@font-face` font files) are replaced with `data:` URIs before serialization. |
 | `stylesheets` | array of `{href, content}` | Same-origin stylesheets in document order. `href` is the resolved URL of the `<link rel="stylesheet">` it came from (`null` for entries not tied to a link element). `content` is the CSS text with same-origin `url(...)` references inlined as `data:` URIs. |
