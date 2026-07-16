@@ -1,0 +1,8 @@
+{
+  "name": "checkout-page",
+  "viewport": {"width": 1280, "height": 720},
+  "status": "pending",
+  "baselineUrl": null,
+  "candidateUrl": null,
+  "diffUrl": null
+}

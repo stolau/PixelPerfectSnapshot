@@ -1,0 +1,80 @@
+export type SnapshotStatus = "pending" | "pass" | "fail" | "approved-baseline-missing";
+
+export interface Viewport {
+  width: number;
+  height: number;
+}
+
+export interface RunSummary {
+  id: string;
+  createdAt: string;
+  snapshotCount: number;
+}
+
+export interface RunDetail {
+  id: string;
+  createdAt: string;
+  snapshots: { name: string; viewport: Viewport; status: SnapshotStatus }[];
+}
+
+export interface SnapshotDetail {
+  name: string;
+  viewport: Viewport;
+  status: SnapshotStatus;
+  baselineUrl: string | null;
+  candidateUrl: string | null;
+  diffUrl: string | null;
+}
+
+export class ApiError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+const API_BASE = import.meta.env.VITE_API_BASE ?? "";
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, init);
+  if (!res.ok) {
+    let message = res.statusText;
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (typeof body.error === "string") {
+        message = body.error;
+      }
+    } catch {
+      // non-JSON error body; keep statusText
+    }
+    throw new ApiError(res.status, message);
+  }
+  return (await res.json()) as T;
+}
+
+export async function listRuns(): Promise<RunSummary[]> {
+  const body = await request<{ runs: RunSummary[] }>("/api/runs");
+  return body.runs;
+}
+
+export function getRun(id: string): Promise<RunDetail> {
+  return request<RunDetail>(`/api/runs/${encodeURIComponent(id)}`);
+}
+
+export function getSnapshot(id: string, name: string): Promise<SnapshotDetail> {
+  return request<SnapshotDetail>(
+    `/api/runs/${encodeURIComponent(id)}/snapshots/${encodeURIComponent(name)}`,
+  );
+}
+
+export function approveSnapshot(
+  id: string,
+  name: string,
+): Promise<{ name: string; status: "pass" }> {
+  return request<{ name: string; status: "pass" }>(
+    `/api/runs/${encodeURIComponent(id)}/snapshots/${encodeURIComponent(name)}/approve`,
+    { method: "POST" },
+  );
+}
