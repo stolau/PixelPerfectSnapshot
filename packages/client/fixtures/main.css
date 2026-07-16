@@ -1,0 +1,22 @@
+@font-face {
+  font-family: PPSTest;
+  src: url(test-font.ttf);
+}
+
+body {
+  margin: 0;
+  padding: 16px;
+  background: #ffd400;
+}
+
+h1 {
+  font-family: PPSTest, sans-serif;
+  font-size: 32px;
+  color: #1a1a6e;
+}
+
+p {
+  font-family: PPSTest, sans-serif;
+  font-size: 20px;
+  color: #222222;
+}

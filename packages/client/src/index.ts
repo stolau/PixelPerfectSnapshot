@@ -9,3 +9,7 @@ export interface Snapshot {
   html: string;
   stylesheets: { href: string | null; content: string }[];
 }
+
+export { captureSnapshot } from "./capture.js";
+export { rehydrate } from "./rehydrate.js";
+export { sendSnapshots } from "./send.js";

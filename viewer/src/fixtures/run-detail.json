@@ -1,0 +1,9 @@
+{
+  "id": "run-2",
+  "createdAt": "2026-07-15T09:30:00Z",
+  "snapshots": [
+    {"name": "checkout-page", "viewport": {"width": 1280, "height": 720}, "status": "pending"},
+    {"name": "login-page", "viewport": {"width": 1280, "height": 720}, "status": "fail"},
+    {"name": "landing-page", "viewport": {"width": 375, "height": 812}, "status": "approved-baseline-missing"}
+  ]
+}
