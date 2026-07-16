@@ -12,6 +12,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/bundle.mjs",
     "lint": "tsc --noEmit",
+    "pretest": "playwright install chromium",
     "test": "npm run build && vitest run"
   },
   "devDependencies": {

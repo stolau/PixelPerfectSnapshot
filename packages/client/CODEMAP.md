@@ -40,4 +40,5 @@ e2e tests and upload them to the backend.
 ## Commands
 
 `npm run build` (tsc → `dist/`, then `scripts/bundle.mjs`) · `npm run lint` (typecheck) ·
-`npm test` (build, then vitest — browser tests need the built `dist/` bundles)
+`npm test` (pretest installs Chromium via `playwright install chromium`, then build, then vitest —
+browser tests need the built `dist/` bundles)
