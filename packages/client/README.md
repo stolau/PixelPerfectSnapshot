@@ -13,8 +13,9 @@ npm install --save-dev pixelperfectsnapshot
 ## Usage
 
 ```ts
-import { captureSnapshot, sendSnapshots } from "pixelperfectsnapshot";
+import { captureSnapshot, createRun, sendSnapshots } from "pixelperfectsnapshot";
 
+const { id: runId } = await createRun({ serverUrl: "http://localhost:5000" });
 const snapshot = await captureSnapshot(document, "my-page");
 await sendSnapshots([snapshot], { serverUrl: "http://localhost:5000", runId });
 ```
