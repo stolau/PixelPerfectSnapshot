@@ -82,3 +82,9 @@ export function approveSnapshot(
     { method: "POST" },
   );
 }
+
+export function processRun(id: string): Promise<RunDetail> {
+  return request<RunDetail>(`/api/runs/${encodeURIComponent(id)}/process`, {
+    method: "POST",
+  });
+}
