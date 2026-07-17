@@ -80,6 +80,14 @@ test("run list renders runs from GET /api/runs, newest first", async () => {
   expect(items[1].textContent).toContain("2026-07-14T18:00:00Z");
 });
 
+test("run list shows an empty-state message when there are no runs", async () => {
+  routes["GET /api/runs"] = { body: { runs: [] } };
+  render(<App />);
+
+  await screen.findByText("No runs yet.");
+  expect(screen.queryAllByRole("listitem").length).toBe(0);
+});
+
 test("run detail renders each snapshot's name and status", async () => {
   await openRunDetail();
 
