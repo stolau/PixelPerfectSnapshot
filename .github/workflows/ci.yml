@@ -14,9 +14,22 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - id: pw-npm
+        run: echo "version=$(node -p "require('./package-lock.json').packages['node_modules/playwright'].version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-npm-${{ steps.pw-npm.outputs.version }}
       - run: npm ci
       - run: npm run lint
       - run: npm test
+      - name: npm pack sanity check
+        run: |
+          npm pack -w packages/client
+          tar -tzf pixelperfectsnapshot-*.tgz > pack-files.txt
+          for f in dist/index.js dist/index.d.ts dist/global.d.ts dist/capture.js dist/rehydrate.js; do
+            grep -qx "package/$f" pack-files.txt || { echo "tarball missing $f"; exit 1; }
+          done
 
   backend:
     runs-on: ubuntu-latest
@@ -31,12 +44,17 @@ jobs:
           cache: npm
       - run: npm ci
         working-directory: .
-      - run: npm run build -w packages/client
-        working-directory: .
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install -e '.[dev]'
+      - id: pw-pip
+        run: |
+          echo "version=$(pip show playwright | sed -n 's/^Version: //p')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-pip-${{ steps.pw-pip.outputs.version }}
       - run: playwright install --with-deps chromium
       - run: ruff check .
       - run: pytest
@@ -49,11 +67,19 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - id: pw-npm
+        run: echo "version=$(node -p "require('./package-lock.json').packages['node_modules/playwright'].version")" >> "$GITHUB_OUTPUT"
       - run: npm ci
-      - run: npm run build -w packages/client
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install -e './backend[dev]'
+      - id: pw-pip
+        run: |
+          echo "version=$(pip show playwright | sed -n 's/^Version: //p')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-npm-${{ steps.pw-npm.outputs.version }}-pip-${{ steps.pw-pip.outputs.version }}
       - run: playwright install --with-deps chromium
       - run: npm run test:e2e -w examples/demo-app
