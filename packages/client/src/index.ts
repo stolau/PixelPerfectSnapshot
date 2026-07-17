@@ -1,3 +1,5 @@
+import "./global.js";
+
 /** Snapshot format version this library produces. See docs/SNAPSHOT_FORMAT.md. */
 export const FORMAT_VERSION = 0;
 

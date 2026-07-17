@@ -11,12 +11,6 @@ import { chromium, type Browser } from "playwright";
 import { sendSnapshots, type Snapshot } from "pixelperfectsnapshot";
 import { afterAll, expect, test } from "vitest";
 
-declare global {
-  interface Window {
-    __ppsCapture(doc: Document, name: string): Promise<Snapshot>;
-  }
-}
-
 const siteDir = fileURLToPath(new URL("site", import.meta.url));
 const backendDir = fileURLToPath(new URL("../../backend", import.meta.url));
 const clientDist = path.dirname(createRequire(import.meta.url).resolve("pixelperfectsnapshot"));
@@ -24,6 +18,11 @@ const captureBundle = path.join(clientDist, "capture.js");
 
 const WIDTH = 480;
 const HEIGHT = 360;
+
+const SETUP_HINT =
+  "backend not set up? From the repo root run:\n" +
+  "  python3 -m venv backend/.venv && backend/.venv/bin/pip install -e 'backend[dev]'\n" +
+  "  backend/.venv/bin/playwright install chromium";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -129,16 +128,23 @@ test(
       env: flaskEnv,
       stdio: ["ignore", "ignore", "pipe"],
     });
+    let spawnError: Error | undefined;
+    flaskProc.on("error", (err) => (spawnError = err));
     let flaskStderr = "";
     flaskProc.stderr?.on("data", (chunk: Buffer) => (flaskStderr += chunk.toString()));
     const deadline = Date.now() + 30_000;
     for (;;) {
+      if (spawnError) {
+        throw new Error(`could not start ${flaskBin}: ${spawnError.message}\n${SETUP_HINT}`);
+      }
       if (flaskProc.exitCode !== null) {
         throw new Error(`flask exited with code ${flaskProc.exitCode}:\n${flaskStderr}`);
       }
       const ok = await fetch(`${serverUrl}/api/health`).then((r) => r.ok, () => false);
       if (ok) break;
-      if (Date.now() > deadline) throw new Error(`flask never became healthy:\n${flaskStderr}`);
+      if (Date.now() > deadline) {
+        throw new Error(`flask never became healthy:\n${flaskStderr}\n${SETUP_HINT}`);
+      }
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
 

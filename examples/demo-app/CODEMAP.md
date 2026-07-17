@@ -16,10 +16,12 @@ upload → render → diff → approve) against the real Flask backend.
 Prerequisites (repo root):
 
 ```sh
-npm ci && npm run build -w packages/client
+npm ci
 python3 -m venv backend/.venv && backend/.venv/bin/pip install -e 'backend[dev]'
 backend/.venv/bin/playwright install chromium
 ```
+
+(`npm ci` builds `packages/client`'s `dist/` via its `prepare` script.)
 
 Then:
 
@@ -28,6 +30,6 @@ npm run test:e2e -w examples/demo-app
 ```
 
 The test resolves the flask binary as: `PPS_FLASK` env var → `backend/.venv/bin/flask` →
-`flask` on PATH. `npm test` here is a stub (no unit tests) so the root workspace test run
-stays green without Python. `npm run lint` builds `packages/client` first (`prelint`) — the
-spec imports the package's built types.
+`flask` on PATH, and fails fast with the setup instructions above when the flask binary can't
+start. `npm test` here is a stub (no unit tests) so the root workspace test run stays green
+without Python.
