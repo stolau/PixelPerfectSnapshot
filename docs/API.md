@@ -78,7 +78,6 @@ Promote this snapshot's candidate PNG to be the approved baseline for its (name,
 and set its status to `pass`.
 `200` → `{"name", "status": "pass"}`
 `409` → no candidate PNG exists yet (not rendered). `404` unknown run or name.
-*Until the render engine lands, the backend may answer `501 Not Implemented`.*
 
 ### `POST /api/runs/<run_id>/process`
 Synchronously render and compare every `pending` snapshot **in this run** (blocks for roughly one

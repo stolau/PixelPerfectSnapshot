@@ -16,3 +16,4 @@ export { captureSnapshot } from "./capture.js";
 export { rehydrate } from "./rehydrate.js";
 export { sendSnapshots } from "./send.js";
 export { processRun } from "./process.js";
+export { createRun } from "./run.js";
