@@ -161,6 +161,33 @@ def test_approve_then_pass(browser_env, app, client, tmp_path):
     assert body["diffUrl"] == f"/api/runs/{run_2}/snapshots/page/images/diff"
 
 
+def test_approve_preserves_prior_baseline_in_history(browser_env, app, client, tmp_path):
+    run_1 = create_run(client)
+    upload(client, run_1, make_snapshot("page", "#2e7d32"))
+    process(app)
+    assert client.post(f"/api/runs/{run_1}/snapshots/page/approve").status_code == 200
+
+    history_dir = tmp_path / "baselines" / "history"
+    # No prior baseline existed before the first approve — nothing to preserve yet.
+    assert not history_dir.exists() or not list(history_dir.rglob("*.png"))
+
+    baseline_files = list((tmp_path / "baselines").glob("*.png"))
+    assert len(baseline_files) == 1
+    v1_bytes = baseline_files[0].read_bytes()
+
+    run_2 = create_run(client)
+    upload(client, run_2, make_snapshot("page", "#b71c1c"))
+    process(app)
+    assert client.post(f"/api/runs/{run_2}/snapshots/page/approve").status_code == 200
+
+    v2_bytes = baseline_files[0].read_bytes()
+    assert v2_bytes != v1_bytes
+
+    history_files = list(history_dir.rglob("*.png"))
+    assert len(history_files) == 1
+    assert history_files[0].read_bytes() == v1_bytes
+
+
 def test_visual_regression_fails(browser_env, app, client, tmp_path):
     run_id = create_run(client)
     upload(client, run_id, make_snapshot("page", "#2e7d32"))
