@@ -56,6 +56,7 @@ function RunList({ onSelectRun }: { onSelectRun: (runId: string) => void }) {
 
   if (error !== null) return <p>Error: {error}</p>;
   if (runs === null) return <p>Loading…</p>;
+  if (runs.length === 0) return <p>No runs yet.</p>;
 
   return (
     <ul>
