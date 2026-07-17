@@ -4,11 +4,14 @@ import {
   ApiError,
   getRun,
   getSnapshot,
+  getSnapshotHistory,
+  historyImageUrl,
   imageUrl,
   listRuns,
   processRun,
 } from "./api.js";
 import type {
+  HistoryEntry,
   RunDetail as RunDetailData,
   RunSummary,
   SnapshotDetail as SnapshotDetailData,
@@ -150,9 +153,15 @@ function SnapshotDetail({
   const [snapshot, setSnapshot] = useState<SnapshotDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [approveError, setApproveError] = useState<string | null>(null);
+  const [history, setHistory] = useState<HistoryEntry[] | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   useEffect(() => {
     getSnapshot(runId, name).then(setSnapshot, (err: Error) => setError(err.message));
+  }, [runId, name]);
+
+  useEffect(() => {
+    getSnapshotHistory(runId, name).then(setHistory, (err: Error) => setHistoryError(err.message));
   }, [runId, name]);
 
   async function approve() {
@@ -161,6 +170,8 @@ function SnapshotDetail({
       await approveSnapshot(runId, name);
       const detail = await getSnapshot(runId, name);
       setSnapshot(detail);
+      const historyDetail = await getSnapshotHistory(runId, name);
+      setHistory(historyDetail);
     } catch (err) {
       if (err instanceof ApiError) {
         setApproveError(`Approve failed (${err.status}): ${err.message}`);
@@ -206,6 +217,23 @@ function SnapshotDetail({
           </div>
           <button onClick={approve}>Approve</button>
           {approveError !== null && <p>{approveError}</p>}
+          <h2>History</h2>
+          {historyError !== null && <p>Error: {historyError}</p>}
+          {historyError === null && history === null && <p>Loading…</p>}
+          {history !== null && history.length === 0 && <p>No history yet.</p>}
+          {history !== null && history.length > 0 && (
+            <div style={{ display: "flex", gap: "1rem" }}>
+              {history.map((entry) => (
+                <div key={entry.timestamp}>
+                  <img
+                    src={historyImageUrl(runId, name, entry.timestamp)}
+                    alt={`history ${entry.timestamp}`}
+                  />
+                  <p>{entry.timestamp}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </>
       )}
     </>

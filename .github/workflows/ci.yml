@@ -83,3 +83,46 @@ jobs:
           key: playwright-${{ runner.os }}-npm-${{ steps.pw-npm.outputs.version }}-pip-${{ steps.pw-pip.outputs.version }}
       - run: playwright install --with-deps chromium
       - run: npm run test:e2e -w examples/demo-app
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build images
+        run: docker compose build
+      - name: Start stack
+        run: docker compose up -d
+      - name: Wait for backend health via nginx proxy
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/health || true)
+            if [ "$code" = "200" ]; then echo "backend healthy after ${i}s"; exit 0; fi
+            sleep 1
+          done
+          echo "backend did not become healthy in time"
+          docker compose logs
+          exit 1
+      - name: Smoke test POST /api/runs through nginx proxy
+        run: |
+          response=$(curl -s -w "\n%{http_code}" -X POST http://localhost:8080/api/runs)
+          code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          echo "$body"
+          if [ "$code" != "201" ]; then
+            echo "expected 201, got $code"
+            docker compose logs
+            exit 1
+          fi
+          if ! echo "$body" | grep -q '"id"'; then
+            echo "missing id field"
+            docker compose logs
+            exit 1
+          fi
+          if ! echo "$body" | grep -q '"createdAt"'; then
+            echo "missing createdAt field"
+            docker compose logs
+            exit 1
+          fi
+      - name: docker compose down
+        if: always()
+        run: docker compose down -v

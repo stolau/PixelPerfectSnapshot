@@ -17,6 +17,8 @@ work that consumes this contract. All request/response bodies are JSON unless no
     (name, viewport); needs human approval to establish one.
 - **Baseline** — the approved rendered **PNG screenshot**, keyed by **(name, viewport)** globally
   (not per run). Approving promotes a snapshot's candidate PNG to be the baseline for its key.
+- **History** — prior baseline PNGs for a (name, viewport) key, kept when a new baseline replaces
+  one. Entries are identified by opaque `timestamp` strings and listed newest-first.
 
 ## Endpoints
 
@@ -72,6 +74,21 @@ once the corresponding PNG exists; `null` until then. `404` unknown run or name.
 ### `GET /api/runs/<run_id>/snapshots/<name>/images/<kind>`
 `kind` ∈ `baseline` | `candidate` | `diff`. `200` → `image/png`. `404` while the image does not
 exist (e.g. before the render engine has processed the snapshot).
+
+### `GET /api/runs/<run_id>/snapshots/<name>/history`
+`200` — newest first:
+```json
+{
+  "history": [
+    {"timestamp": "20260715T093000000000Z"},
+    {"timestamp": "20260714T180000000000Z"}
+  ]
+}
+```
+`404` unknown run or name.
+
+### `GET /api/runs/<run_id>/snapshots/<name>/history/<timestamp>`
+`200` → `image/png`. `404` unknown run, name, or timestamp.
 
 ### `POST /api/runs/<run_id>/snapshots/<name>/approve`
 Promote this snapshot's candidate PNG to be the approved baseline for its (name, viewport) key,

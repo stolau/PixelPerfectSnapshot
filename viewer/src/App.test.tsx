@@ -5,6 +5,7 @@ import runsFixture from "./fixtures/runs.json";
 import runDetailFixture from "./fixtures/run-detail.json";
 import snapshotDetailFixture from "./fixtures/snapshot-detail.json";
 import snapshotDetailRenderedFixture from "./fixtures/snapshot-detail-rendered.json";
+import snapshotHistoryFixture from "./fixtures/snapshot-history.json";
 
 const RUN_ID = runDetailFixture.id; // "run-2", first (newest) entry in runs.json
 const SNAPSHOT_NAME = snapshotDetailFixture.name; // "checkout-page"
@@ -23,6 +24,7 @@ beforeEach(() => {
     "GET /api/runs": { body: runsFixture },
     [`GET /api/runs/${RUN_ID}`]: { body: runDetailFixture },
     [`GET ${SNAPSHOT_URL}`]: { body: snapshotDetailFixture },
+    [`GET ${SNAPSHOT_URL}/history`]: { body: { history: [] } },
   };
   fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url =
@@ -196,4 +198,31 @@ test("approve 501 shows the error and leaves status unchanged", async () => {
   await screen.findByText("Approve failed (501): Not Implemented");
   expect(screen.getByText("Status: fail")).toBeDefined();
   expect(screen.queryByText("Status: pass")).toBeNull();
+});
+
+test("snapshot detail renders history entries newest-first with correct image URLs", async () => {
+  routes[`GET ${SNAPSHOT_URL}/history`] = { body: snapshotHistoryFixture };
+  await openSnapshotDetail();
+
+  const timestamps = snapshotHistoryFixture.history.map((entry) => entry.timestamp);
+  // The fixture itself must be newest-first, matching the API contract.
+  expect(timestamps).toEqual([...timestamps].sort().reverse());
+
+  await screen.findByText(timestamps[0]);
+  expect(requests()).toContainEqual({ method: "GET", url: `${SNAPSHOT_URL}/history` });
+  expect(screen.queryByText("No history yet.")).toBeNull();
+
+  const images = screen.getAllByAltText(/^history /);
+  expect(images.length).toBe(timestamps.length);
+  images.forEach((img, i) => {
+    expect(img.getAttribute("src")).toBe(`${SNAPSHOT_URL}/history/${timestamps[i]}`);
+  });
+
+  // Entries render in the same (newest-first) order the API provided them.
+  const renderedTimestamps = timestamps.map((ts) => screen.getByText(ts));
+  const container = renderedTimestamps[0].parentElement!.parentElement!;
+  const entryDivs = Array.from(container.children);
+  renderedTimestamps.forEach((p, i) => {
+    expect(entryDivs[i].contains(p)).toBe(true);
+  });
 });

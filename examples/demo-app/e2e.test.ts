@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser } from "playwright";
-import { processRun, sendSnapshots, type Snapshot } from "pixelperfectsnapshot";
+import { createRun, processRun, sendSnapshots, type Snapshot } from "pixelperfectsnapshot";
 import { afterAll, expect, test } from "vitest";
 
 const siteDir = fileURLToPath(new URL("site", import.meta.url));
@@ -44,12 +44,6 @@ let siteUrl = "";
 let serverUrl = "";
 let flaskBin = "flask";
 let flaskEnv: NodeJS.ProcessEnv = process.env;
-
-async function createRun(): Promise<string> {
-  const res = await fetch(`${serverUrl}/api/runs`, { method: "POST" });
-  expect(res.status).toBe(201);
-  return ((await res.json()) as { id: string }).id;
-}
 
 async function getSnapshotDetail(runId: string) {
   const res = await fetch(`${serverUrl}/api/runs/${runId}/snapshots/demo-page`);
@@ -184,7 +178,7 @@ test(
 
     // 1. Run 1: capture the live demo page and upload it — status starts "pending".
     browser = await chromium.launch();
-    const run1 = await createRun();
+    const run1 = (await createRun({ serverUrl })).id;
     const snapshot1 = await capturePage(siteUrl);
     expect(snapshot1.name).toBe("demo-page");
     expect(snapshot1.viewport).toEqual({ width: WIDTH, height: HEIGHT });
@@ -214,14 +208,14 @@ test(
     expect(baselineRes.headers.get("content-type")).toContain("image/png");
 
     // 4. Run 2: the unchanged page must pass against the approved baseline.
-    const run2 = await createRun();
+    const run2 = (await createRun({ serverUrl })).id;
     await sendSnapshots([await capturePage(siteUrl)], { serverUrl, runId: run2 });
     await processRun({ serverUrl, runId: run2 });
     expect((await getSnapshotDetail(run2)).status).toBe("pass");
 
     // 5. Run 3: a real visual regression (box color change) must fail with a diff image.
     variant = "changed";
-    const run3 = await createRun();
+    const run3 = (await createRun({ serverUrl })).id;
     await sendSnapshots([await capturePage(siteUrl)], { serverUrl, runId: run3 });
     await processRun({ serverUrl, runId: run3 });
     const failed = await getSnapshotDetail(run3);
@@ -243,7 +237,7 @@ test(
 
     // 1. Run 4: capture at a second viewport → needs approval (no 320x240 baseline exists).
     //    (`variant` is still "changed" from run 3 — harmless, there is nothing to diff against.)
-    const run4 = await createRun();
+    const run4 = (await createRun({ serverUrl })).id;
     await sendSnapshots([await capturePage(siteUrl, { width: 320, height: 240 })], {
       serverUrl,
       runId: run4,
