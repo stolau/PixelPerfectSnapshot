@@ -9,7 +9,7 @@ import jsonschema
 from flask import Blueprint, Response, current_app, jsonify, request, send_file, url_for
 
 from app.db import get_db
-from app.render import baseline_path, image_path, process_pending
+from app.render import baseline_history_path, baseline_path, image_path, process_pending
 
 bp = Blueprint("api", __name__, url_prefix="/api")
 
@@ -174,6 +174,15 @@ def approve_snapshot(run_id: str, name: str) -> tuple[Response, int] | tuple[dic
         return _error("no candidate image exists yet; snapshot has not been rendered", 409)
     baseline = _image_file(run_id, snapshot, "baseline")
     baseline.parent.mkdir(parents=True, exist_ok=True)
+    if baseline.exists():
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        history_path = baseline_history_path(
+            current_app.config["DATA_DIR"],
+            snapshot["name"], snapshot["viewport_width"], snapshot["viewport_height"],
+            timestamp,
+        )
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(baseline, history_path)
     shutil.copyfile(candidate, baseline)
     db = get_db()
     db.execute("UPDATE snapshots SET status = 'pass' WHERE run_id = ? AND name = ?", (run_id, name))
