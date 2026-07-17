@@ -1,0 +1,12 @@
+node_modules/
+backend/.venv/
+backend/data/
+**/dist/
+.git/
+.github/
+.claude/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+coverage/
