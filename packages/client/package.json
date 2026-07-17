@@ -3,15 +3,27 @@
   "version": "0.0.1",
   "description": "Capture DOM snapshots in e2e tests and upload them to a PixelPerfectSnapshot backend",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stolau/PixelPerfectSnapshot.git",
+    "directory": "packages/client"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "files": [
     "dist"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/bundle.mjs",
     "lint": "tsc --noEmit",
+    "prepare": "npm run build",
     "pretest": "playwright install chromium",
     "test": "npm run build && vitest run"
   },

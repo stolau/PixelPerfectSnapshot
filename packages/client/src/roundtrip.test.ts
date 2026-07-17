@@ -98,6 +98,10 @@ test(
     expect(ajv.errors ?? []).toEqual([]);
     expect(valid).toBe(true);
 
+    // A null stylesheet href must be rejected by the v0.1 schema.
+    const nullHref: unknown = { ...snapshot, stylesheets: [{ href: null, content: "" }] };
+    expect(ajv.validate(schema, nullHref)).toBe(false);
+
     expect(snapshot.formatVersion).toBe(0);
     expect(snapshot.name).toBe("fixture-page");
     expect(snapshot.viewport).toEqual({ width: WIDTH, height: HEIGHT });

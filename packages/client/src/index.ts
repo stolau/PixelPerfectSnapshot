@@ -1,3 +1,5 @@
+import "./global.js";
+
 /** Snapshot format version this library produces. See docs/SNAPSHOT_FORMAT.md. */
 export const FORMAT_VERSION = 0;
 
@@ -7,9 +9,10 @@ export interface Snapshot {
   name: string;
   viewport: { width: number; height: number };
   html: string;
-  stylesheets: { href: string | null; content: string }[];
+  stylesheets: { href: string; content: string }[];
 }
 
 export { captureSnapshot } from "./capture.js";
 export { rehydrate } from "./rehydrate.js";
 export { sendSnapshots } from "./send.js";
+export { processRun } from "./process.js";

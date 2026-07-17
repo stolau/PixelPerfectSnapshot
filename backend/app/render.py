@@ -43,12 +43,17 @@ def compare(
     return differing / (width * height) <= max_diff_ratio
 
 
-def process_pending() -> list[tuple[str, str, str]]:
+def process_pending(run_id: str | None = None) -> list[tuple[str, str, str]]:
     db = get_db()
-    rows = db.execute(
+    query = (
         "SELECT id, run_id, name, viewport_width, viewport_height"
-        " FROM snapshots WHERE status = 'pending' ORDER BY id"
-    ).fetchall()
+        " FROM snapshots WHERE status = 'pending'"
+    )
+    params: tuple[str, ...] = ()
+    if run_id is not None:
+        query += " AND run_id = ?"
+        params = (run_id,)
+    rows = db.execute(query + " ORDER BY id", params).fetchall()
     if not rows:
         return []
     if not REHYDRATE_JS.exists():
@@ -94,7 +99,7 @@ def process_pending() -> list[tuple[str, str, str]]:
                 )
                 status = "pass" if within_tolerance else "fail"
             db.execute("UPDATE snapshots SET status = ? WHERE id = ?", (status, row["id"]))
+            db.commit()
             results.append((row["run_id"], row["name"], status))
         browser.close()
-    db.commit()
     return results

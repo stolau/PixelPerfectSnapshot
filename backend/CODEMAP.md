@@ -16,11 +16,14 @@ approved baselines. HTTP contract: `docs/API.md`. Upload payload contract:
   `GET /api/runs/<run_id>/snapshots/<name>`,
   `GET /api/runs/<run_id>/snapshots/<name>/images/<kind>` (serves the PNGs; 404 until rendered),
   `POST /api/runs/<run_id>/snapshots/<name>/approve` (promotes the candidate PNG to baseline,
-  status → `pass`; 409 if no candidate yet).
-- `app/render.py` — render engine: `process_pending()` re-renders each `pending` snapshot in
-  headless Chromium (network aborted; injects the built `packages/client/dist/rehydrate.js`),
-  screenshots a candidate PNG, and Pillow-diffs it against the approved baseline (`compare()`,
-  always writes a red-on-grayscale diff PNG). Path helpers: `baseline_path()`, `image_path()`.
+  status → `pass`; 409 if no candidate yet),
+  `POST /api/runs/<run_id>/process` (synchronously renders the run's pending snapshots, returns
+  the `GET /api/runs/<run_id>` body; 500 if the rehydrate bundle is missing).
+- `app/render.py` — render engine: `process_pending(run_id=None)` re-renders each `pending`
+  snapshot (run-scoped when `run_id` is given; commits per snapshot) in headless Chromium
+  (network aborted; injects the built `packages/client/dist/rehydrate.js`), screenshots a
+  candidate PNG, and Pillow-diffs it against the approved baseline (`compare()`, always writes a
+  red-on-grayscale diff PNG). Path helpers: `baseline_path()`, `image_path()`.
 - `app/db.py` — SQLite plumbing (stdlib `sqlite3`): schema, per-request connection via `flask.g`.
 - `tests/` — pytest suite (uses the Flask test client; also validates
   `docs/examples/example-snapshot.json` against the schema).
