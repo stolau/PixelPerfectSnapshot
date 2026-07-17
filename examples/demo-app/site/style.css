@@ -1,0 +1,15 @@
+body {
+  font-family: sans-serif;
+  margin: 24px;
+}
+
+h1 {
+  color: #222;
+}
+
+.box {
+  width: 120px;
+  height: 120px;
+  background: #1a1a6e;
+  border-radius: 8px;
+}

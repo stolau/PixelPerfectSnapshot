@@ -3,7 +3,8 @@
   "private": true,
   "workspaces": [
     "packages/client",
-    "viewer"
+    "viewer",
+    "examples/demo-app"
   ],
   "scripts": {
     "lint": "npm run lint --workspaces",

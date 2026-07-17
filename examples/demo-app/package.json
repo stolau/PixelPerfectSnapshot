@@ -1,0 +1,20 @@
+{
+  "name": "demo-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "tsc --noEmit",
+    "test": "echo \"demo-app has no unit tests; run the e2e suite: npm run test:e2e (needs Python backend, see CODEMAP.md)\"",
+    "pretest:e2e": "playwright install chromium",
+    "test:e2e": "vitest run"
+  },
+  "dependencies": {
+    "pixelperfectsnapshot": "0.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "playwright": "^1.48.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.1.0"
+  }
+}
