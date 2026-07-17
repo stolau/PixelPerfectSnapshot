@@ -9,7 +9,7 @@ import jsonschema
 from flask import Blueprint, Response, current_app, jsonify, request, send_file, url_for
 
 from app.db import get_db
-from app.render import baseline_history_path, baseline_path, image_path, process_pending
+from app.render import baseline_history_dir, baseline_history_path, baseline_path, image_path, process_pending
 
 bp = Blueprint("api", __name__, url_prefix="/api")
 
@@ -159,6 +159,38 @@ def get_image(run_id: str, name: str, kind: str) -> Response | tuple[Response, i
     path = _image_file(run_id, snapshot, kind)
     if not path.exists():
         return _error("image not found", 404)
+    return send_file(path, mimetype="image/png")
+
+
+@bp.get("/runs/<run_id>/snapshots/<name>/history")
+def get_snapshot_history(run_id: str, name: str) -> tuple[Response, int] | dict[str, object]:
+    if _get_run(run_id) is None:
+        return _error("run not found", 404)
+    snapshot = _get_snapshot(run_id, name)
+    if snapshot is None:
+        return _error("snapshot not found", 404)
+    history_dir = baseline_history_dir(
+        current_app.config["DATA_DIR"],
+        snapshot["name"], snapshot["viewport_width"], snapshot["viewport_height"],
+    )
+    timestamps = [p.stem for p in history_dir.glob("*.png")] if history_dir.exists() else []
+    return {"history": [{"timestamp": ts} for ts in sorted(timestamps, reverse=True)]}
+
+
+@bp.get("/runs/<run_id>/snapshots/<name>/history/<timestamp>")
+def get_snapshot_history_image(run_id: str, name: str, timestamp: str) -> Response | tuple[Response, int]:
+    if _get_run(run_id) is None:
+        return _error("run not found", 404)
+    snapshot = _get_snapshot(run_id, name)
+    if snapshot is None:
+        return _error("snapshot not found", 404)
+    path = baseline_history_path(
+        current_app.config["DATA_DIR"],
+        snapshot["name"], snapshot["viewport_width"], snapshot["viewport_height"],
+        timestamp,
+    )
+    if not path.exists():
+        return _error("history entry not found", 404)
     return send_file(path, mimetype="image/png")
 
 

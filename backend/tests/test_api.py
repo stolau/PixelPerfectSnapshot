@@ -135,6 +135,8 @@ def test_unknown_run_404(client):
         ("get", "/api/runs/bogus"),
         ("get", "/api/runs/bogus/snapshots/example-page"),
         ("post", "/api/runs/bogus/process"),
+        ("get", "/api/runs/bogus/snapshots/example-page/history"),
+        ("get", "/api/runs/bogus/snapshots/example-page/history/some-timestamp"),
     ]:
         response = getattr(client, method)(url, json=load_example())
         assert response.status_code == 404
@@ -143,9 +145,24 @@ def test_unknown_run_404(client):
 
 def test_unknown_snapshot_404(client):
     run_id = create_run(client)
-    response = client.get(f"/api/runs/{run_id}/snapshots/no-such-name")
-    assert response.status_code == 404
-    assert "error" in response.get_json()
+    for url in [
+        f"/api/runs/{run_id}/snapshots/no-such-name",
+        f"/api/runs/{run_id}/snapshots/no-such-name/history",
+        f"/api/runs/{run_id}/snapshots/no-such-name/history/some-timestamp",
+    ]:
+        response = client.get(url)
+        assert response.status_code == 404
+        assert "error" in response.get_json()
+
+
+def test_snapshot_history_never_approved(client):
+    example = load_example()
+    run_id = create_run(client)
+    client.post(f"/api/runs/{run_id}/snapshots", json=example)
+
+    response = client.get(f"/api/runs/{run_id}/snapshots/{example['name']}/history")
+    assert response.status_code == 200
+    assert response.get_json() == {"history": []}
 
 
 def test_duplicate_name_409(client):

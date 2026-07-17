@@ -17,6 +17,9 @@ approved baselines. HTTP contract: `docs/API.md`. Upload payload contract:
   `GET /api/runs/<run_id>`, `POST /api/runs/<run_id>/snapshots` (schema-validated),
   `GET /api/runs/<run_id>/snapshots/<name>`,
   `GET /api/runs/<run_id>/snapshots/<name>/images/<kind>` (serves the PNGs; 404 until rendered),
+  `GET /api/runs/<run_id>/snapshots/<name>/history` (lists history entries newest-first),
+  `GET /api/runs/<run_id>/snapshots/<name>/history/<timestamp>` (serves a history PNG; 404 unknown
+  timestamp),
   `POST /api/runs/<run_id>/snapshots/<name>/approve` (promotes the candidate PNG to baseline,
   preserving the outgoing baseline under `baselines/history/`, status → `pass`; 409 if no
   candidate yet),
@@ -26,8 +29,8 @@ approved baselines. HTTP contract: `docs/API.md`. Upload payload contract:
   snapshot (run-scoped when `run_id` is given; commits per snapshot) in headless Chromium
   (network aborted; injects the built `packages/client/dist/rehydrate.js`), screenshots a
   candidate PNG, and Pillow-diffs it against the approved baseline (`compare()`, always writes a
-  red-on-grayscale diff PNG). Path helpers: `baseline_path()`, `baseline_history_path()`,
-  `image_path()`.
+  red-on-grayscale diff PNG). Path helpers: `baseline_path()`, `baseline_history_dir()`,
+  `baseline_history_path()`, `image_path()`.
 - `app/db.py` — SQLite plumbing (stdlib `sqlite3`): schema, per-request connection via `flask.g`.
 - `tests/` — pytest suite (uses the Flask test client; also validates
   `docs/examples/example-snapshot.json` against the schema).
@@ -42,7 +45,7 @@ Data dir: `create_app(data_dir=...)` arg, else `PPS_DATA_DIR` env var, else `bac
 - `images/<run_id>/<snapshot_id>/{candidate,diff}.png` — rendered candidate and diff PNGs.
 - `baselines/<sha256(name\nWxH)>.png` — approved baselines, keyed globally by (name, viewport).
 - `baselines/history/<sha256...>/<timestamp>.png` — baseline PNGs displaced by a later approve,
-  kept for audit; never read by the app.
+  kept for audit; served via the `.../history` and `.../history/<timestamp>` endpoints.
 
 ## Commands
 
