@@ -14,10 +14,6 @@ export async function rehydrate(snapshot: Snapshot, doc: Document = document): P
   for (const entry of snapshot.stylesheets) {
     const style = doc.createElement("style");
     style.textContent = entry.content;
-    if (entry.href === null) {
-      doc.head.appendChild(style);
-      continue;
-    }
     let match: Element | null = null;
     for (const link of Array.from(doc.querySelectorAll("link[href]"))) {
       if (!isStylesheetRel(link.getAttribute("rel"))) continue;

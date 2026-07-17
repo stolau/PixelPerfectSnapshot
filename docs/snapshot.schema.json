@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/stolau/PixelPerfectSnapshot/main/docs/snapshot.schema.json",
-  "title": "PixelPerfectSnapshot snapshot (format v0)",
+  "title": "PixelPerfectSnapshot snapshot (format v0.1, formatVersion 0)",
   "type": "object",
   "required": ["formatVersion", "name", "viewport", "html", "stylesheets"],
   "additionalProperties": false,
@@ -35,7 +35,7 @@
         "required": ["href", "content"],
         "additionalProperties": false,
         "properties": {
-          "href": { "type": ["string", "null"] },
+          "href": { "type": "string" },
           "content": { "type": "string" }
         }
       }

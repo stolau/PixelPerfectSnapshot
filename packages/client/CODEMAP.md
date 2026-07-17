@@ -13,7 +13,8 @@ e2e tests and upload them to the backend.
   `POST /api/runs/<runId>/snapshots` (see `docs/API.md`); throws on the first non-ok response.
 - `rehydrate(snapshot, doc?): Promise<void>` — applies snapshot stylesheets, disables
   animations/transitions, and resolves once fonts and images have loaded
-  (`docs/SNAPSHOT_FORMAT.md` rehydration steps 2–3).
+  (`docs/SNAPSHOT_FORMAT.md` rehydration steps 2–3); appends the `<style>` at end of `<head>`
+  when no matching `<link>` exists.
 
 ## Built artifacts (`dist/`, via `npm run build`)
 
