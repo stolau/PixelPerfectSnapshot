@@ -80,6 +80,16 @@ and set its status to `pass`.
 `409` → no candidate PNG exists yet (not rendered). `404` unknown run or name.
 *Until the render engine lands, the backend may answer `501 Not Implemented`.*
 
+### `POST /api/runs/<run_id>/process`
+Synchronously render and compare every `pending` snapshot **in this run** (blocks for roughly one
+second per snapshot). No request body.
+`200` → exactly the `GET /api/runs/<run_id>` body, reflecting post-processing statuses.
+`404` unknown run.
+`500` → `{"error": "<message>"}` when the render engine is unavailable (missing rehydrate bundle).
+Calling with nothing pending is a no-op returning the current run body. Concurrent calls for the
+same run may duplicate render work, but rendering is deterministic, so they converge to the same
+statuses — safe, just wasteful.
+
 ## Errors
 
 All error responses: `{"error": "<human-readable message>"}` with the status codes above.

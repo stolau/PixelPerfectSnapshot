@@ -1,4 +1,4 @@
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser } from "playwright";
-import { sendSnapshots, type Snapshot } from "pixelperfectsnapshot";
+import { processRun, sendSnapshots, type Snapshot } from "pixelperfectsnapshot";
 import { afterAll, expect, test } from "vitest";
 
 const siteDir = fileURLToPath(new URL("site", import.meta.url));
@@ -44,14 +44,6 @@ let siteUrl = "";
 let serverUrl = "";
 let flaskBin = "flask";
 let flaskEnv: NodeJS.ProcessEnv = process.env;
-
-function processPending() {
-  const out = execFileSync(flaskBin, ["--app", "app", "process-pending"], {
-    cwd: backendDir,
-    env: flaskEnv,
-  }).toString();
-  console.log(`process-pending:\n${out.trimEnd()}`);
-}
 
 async function createRun(): Promise<string> {
   const res = await fetch(`${serverUrl}/api/runs`, { method: "POST" });
@@ -203,7 +195,7 @@ test(
     ]);
 
     // 2. Render it: no baseline exists yet, so it needs approval.
-    processPending();
+    await processRun({ serverUrl, runId: run1 });
     const afterRender = await getSnapshotDetail(run1);
     expect(afterRender.status).toBe("approved-baseline-missing");
     expect(afterRender.candidateUrl).not.toBeNull();
@@ -224,14 +216,14 @@ test(
     // 4. Run 2: the unchanged page must pass against the approved baseline.
     const run2 = await createRun();
     await sendSnapshots([await capturePage(siteUrl)], { serverUrl, runId: run2 });
-    processPending();
+    await processRun({ serverUrl, runId: run2 });
     expect((await getSnapshotDetail(run2)).status).toBe("pass");
 
     // 5. Run 3: a real visual regression (box color change) must fail with a diff image.
     variant = "changed";
     const run3 = await createRun();
     await sendSnapshots([await capturePage(siteUrl)], { serverUrl, runId: run3 });
-    processPending();
+    await processRun({ serverUrl, runId: run3 });
     const failed = await getSnapshotDetail(run3);
     expect(failed.status).toBe("fail");
     expect(failed.diffUrl).not.toBeNull();
@@ -256,7 +248,7 @@ test(
       serverUrl,
       runId: run4,
     });
-    processPending();
+    await processRun({ serverUrl, runId: run4 });
     expect((await getSnapshotDetail(run4)).status).toBe("approved-baseline-missing");
 
     // 2. Serve the built viewer (VITE_API_BASE=/backend baked in) and forward /backend/* to flask.

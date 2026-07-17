@@ -134,6 +134,7 @@ def test_unknown_run_404(client):
         ("post", "/api/runs/bogus/snapshots"),
         ("get", "/api/runs/bogus"),
         ("get", "/api/runs/bogus/snapshots/example-page"),
+        ("post", "/api/runs/bogus/process"),
     ]:
         response = getattr(client, method)(url, json=load_example())
         assert response.status_code == 404

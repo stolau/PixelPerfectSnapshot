@@ -9,7 +9,7 @@ import jsonschema
 from flask import Blueprint, Response, current_app, jsonify, request, send_file, url_for
 
 from app.db import get_db
-from app.render import baseline_path, image_path
+from app.render import baseline_path, image_path, process_pending
 
 bp = Blueprint("api", __name__, url_prefix="/api")
 
@@ -179,3 +179,14 @@ def approve_snapshot(run_id: str, name: str) -> tuple[Response, int] | tuple[dic
     db.execute("UPDATE snapshots SET status = 'pass' WHERE run_id = ? AND name = ?", (run_id, name))
     db.commit()
     return {"name": name, "status": "pass"}, 200
+
+
+@bp.post("/runs/<run_id>/process")
+def process_run(run_id: str) -> tuple[Response, int] | dict[str, object]:
+    if _get_run(run_id) is None:
+        return _error("run not found", 404)
+    try:
+        process_pending(run_id)
+    except FileNotFoundError as exc:
+        return _error(str(exc), 500)
+    return get_run(run_id)
