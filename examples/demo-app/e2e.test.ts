@@ -27,15 +27,48 @@ const SETUP_HINT =
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
   ".png": "image/png",
 };
 
 let flaskProc: ChildProcess | undefined;
 let server: Server | undefined;
+let viewerServer: Server | undefined;
 let browser: Browser | undefined;
 let dataDir: string | undefined;
 /** The static server swaps the .box color when this is "changed" (run 3's regression). */
 let variant: "original" | "changed" = "original";
+
+// Assigned by the pipeline test; the viewer test reuses the same flask/site/browser.
+let siteUrl = "";
+let serverUrl = "";
+let flaskBin = "flask";
+let flaskEnv: NodeJS.ProcessEnv = process.env;
+
+function processPending() {
+  const out = execFileSync(flaskBin, ["--app", "app", "process-pending"], {
+    cwd: backendDir,
+    env: flaskEnv,
+  }).toString();
+  console.log(`process-pending:\n${out.trimEnd()}`);
+}
+
+async function createRun(): Promise<string> {
+  const res = await fetch(`${serverUrl}/api/runs`, { method: "POST" });
+  expect(res.status).toBe(201);
+  return ((await res.json()) as { id: string }).id;
+}
+
+async function getSnapshotDetail(runId: string) {
+  const res = await fetch(`${serverUrl}/api/runs/${runId}/snapshots/demo-page`);
+  expect(res.status).toBe(200);
+  return (await res.json()) as {
+    status: string;
+    baselineUrl: string | null;
+    candidateUrl: string | null;
+    diffUrl: string | null;
+  };
+}
 
 afterAll(async () => {
   if (flaskProc && flaskProc.exitCode === null) {
@@ -46,6 +79,12 @@ afterAll(async () => {
     server.closeAllConnections();
     await new Promise<void>((resolve, reject) =>
       server?.close((err) => (err ? reject(err) : resolve())),
+    );
+  }
+  if (viewerServer?.listening) {
+    viewerServer.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      viewerServer?.close((err) => (err ? reject(err) : resolve())),
     );
   }
   await browser?.close();
@@ -62,9 +101,12 @@ function freePort(): Promise<number> {
   });
 }
 
-async function capturePage(baseUrl: string): Promise<Snapshot> {
+async function capturePage(
+  baseUrl: string,
+  viewport = { width: WIDTH, height: HEIGHT },
+): Promise<Snapshot> {
   if (!browser) throw new Error("browser not launched");
-  const context = await browser.newContext({ viewport: { width: WIDTH, height: HEIGHT } });
+  const context = await browser.newContext({ viewport });
   const page = await context.newPage();
   await page.goto(`${baseUrl}/index.html`, { waitUntil: "load" });
   await page.evaluate(async () => {
@@ -115,14 +157,14 @@ test(
     });
     server = srv;
     await new Promise<void>((resolve) => srv.listen(0, "127.0.0.1", resolve));
-    const siteUrl = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+    siteUrl = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
 
     // The real Flask backend, with a throwaway data dir.
     const venvFlask = path.join(backendDir, ".venv", "bin", "flask");
-    const flaskBin = process.env.PPS_FLASK ?? (existsSync(venvFlask) ? venvFlask : "flask");
-    const flaskEnv = { ...process.env, PPS_DATA_DIR: dataDir };
+    flaskBin = process.env.PPS_FLASK ?? (existsSync(venvFlask) ? venvFlask : "flask");
+    flaskEnv = { ...process.env, PPS_DATA_DIR: dataDir };
     const flaskPort = await freePort();
-    const serverUrl = `http://127.0.0.1:${flaskPort}`;
+    serverUrl = `http://127.0.0.1:${flaskPort}`;
     flaskProc = spawn(flaskBin, ["--app", "app", "run", "--port", String(flaskPort)], {
       cwd: backendDir,
       env: flaskEnv,
@@ -147,29 +189,6 @@ test(
       }
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
-
-    const processPending = () => {
-      const out = execFileSync(flaskBin, ["--app", "app", "process-pending"], {
-        cwd: backendDir,
-        env: flaskEnv,
-      }).toString();
-      console.log(`process-pending:\n${out.trimEnd()}`);
-    };
-    const createRun = async (): Promise<string> => {
-      const res = await fetch(`${serverUrl}/api/runs`, { method: "POST" });
-      expect(res.status).toBe(201);
-      return ((await res.json()) as { id: string }).id;
-    };
-    const getSnapshotDetail = async (runId: string) => {
-      const res = await fetch(`${serverUrl}/api/runs/${runId}/snapshots/demo-page`);
-      expect(res.status).toBe(200);
-      return (await res.json()) as {
-        status: string;
-        baselineUrl: string | null;
-        candidateUrl: string | null;
-        diffUrl: string | null;
-      };
-    };
 
     // 1. Run 1: capture the live demo page and upload it — status starts "pending".
     browser = await chromium.launch();
@@ -221,6 +240,121 @@ test(
     expect(diffRes.headers.get("content-type")).toContain("image/png");
     const diffBytes = Buffer.from(await diffRes.arrayBuffer());
     expect(diffBytes.subarray(0, 4)).toEqual(Buffer.from("\x89PNG", "latin1"));
+  },
+  240_000,
+);
+
+test(
+  "viewer against the live backend: images load through /backend, approve updates the UI",
+  async () => {
+    if (!browser || serverUrl === "") throw new Error("pipeline test must run (and pass) first");
+
+    // 1. Run 4: capture at a second viewport → needs approval (no 320x240 baseline exists).
+    //    (`variant` is still "changed" from run 3 — harmless, there is nothing to diff against.)
+    const run4 = await createRun();
+    await sendSnapshots([await capturePage(siteUrl, { width: 320, height: 240 })], {
+      serverUrl,
+      runId: run4,
+    });
+    processPending();
+    expect((await getSnapshotDetail(run4)).status).toBe("approved-baseline-missing");
+
+    // 2. Serve the built viewer (VITE_API_BASE=/backend baked in) and forward /backend/* to flask.
+    const viewerDist = fileURLToPath(new URL("../../viewer/dist", import.meta.url));
+    if (!existsSync(path.join(viewerDist, "index.html"))) {
+      throw new Error(
+        `missing ${viewerDist}/index.html — run \`npm run test:e2e -w examples/demo-app\` so pretest:e2e builds the viewer`,
+      );
+    }
+    const vsrv = createServer((req, res) => {
+      const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
+      if (pathname.startsWith("/backend/")) {
+        // Forward to flask with the prefix stripped. The only POST (approve) has no body.
+        fetch(`${serverUrl}${pathname.slice("/backend".length)}`, { method: req.method }).then(
+          async (upstream) => {
+            res.writeHead(upstream.status, {
+              "Content-Type": upstream.headers.get("content-type") ?? "application/octet-stream",
+            });
+            res.end(Buffer.from(await upstream.arrayBuffer()));
+          },
+          () => {
+            res.writeHead(502);
+            res.end();
+          },
+        );
+        return;
+      }
+      const filePath = pathname === "/" ? "/index.html" : pathname;
+      let body: Buffer;
+      try {
+        body = readFileSync(path.join(viewerDist, filePath));
+      } catch {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      res.writeHead(200, {
+        "Content-Type": MIME[path.extname(filePath)] ?? "application/octet-stream",
+      });
+      res.end(body);
+    });
+    viewerServer = vsrv;
+    await new Promise<void>((resolve) => vsrv.listen(0, "127.0.0.1", resolve));
+    const viewerUrl = `http://127.0.0.1:${(vsrv.address() as AddressInfo).port}`;
+
+    // 3. Drive the viewer UI in a browser. Viewport here is for the viewer UI, not snapshots.
+    const context = await browser.newContext({ viewport: { width: 1200, height: 700 } });
+    const page = await context.newPage();
+    await page.goto(viewerUrl, { waitUntil: "load" });
+
+    // Run list: 4 runs. createdAt has second resolution and every run has "1 snapshots", so
+    // button texts are likely identical — select positionally (newest first: run 4 is first).
+    const runButtons = page.locator("ul li button");
+    await runButtons.first().waitFor();
+    expect(await runButtons.count()).toBe(4);
+
+    // Run 4 detail: approval needed at the new viewport.
+    await runButtons.first().click();
+    const run4Snapshot = page.getByRole("button", {
+      name: "demo-page — 320x240 — approved-baseline-missing",
+    });
+    await run4Snapshot.waitFor();
+
+    // Run 4 snapshot detail: candidate image must actually load through the /backend prefix.
+    await run4Snapshot.click();
+    await page.getByText("Status: approved-baseline-missing").waitFor();
+    await page.waitForFunction(() => {
+      const img = document.querySelector<HTMLImageElement>('img[alt="candidate"]');
+      return img !== null && img.naturalWidth > 0;
+    });
+    expect(await page.locator('img[alt="baseline"]').count()).toBe(0);
+    expect(await page.getByText("not available").count()).toBe(2); // baseline + diff panes
+
+    // Approve: the UI must reflect the server's post-approve state (pass + real baseline).
+    await page.getByRole("button", { name: "Approve" }).click();
+    await page.getByText("Status: pass").waitFor();
+    await page.waitForFunction(() => {
+      const img = document.querySelector<HTMLImageElement>('img[alt="baseline"]');
+      return img !== null && img.naturalWidth > 0;
+    });
+
+    // Back out to the run list, then into run 3 (second button): the regression run.
+    await page.getByRole("button", { name: "Back" }).click(); // → run 4 detail
+    await page.getByRole("button", { name: "Back" }).click(); // → run list
+    await runButtons.first().waitFor();
+    await runButtons.nth(1).click();
+    const run3Snapshot = page.getByRole("button", { name: "demo-page — 480x360 — fail" });
+    await run3Snapshot.waitFor();
+    await run3Snapshot.click();
+    await page.getByText("Status: fail").waitFor();
+    for (const alt of ["baseline", "candidate", "diff"]) {
+      await page.waitForFunction((a) => {
+        const img = document.querySelector<HTMLImageElement>(`img[alt="${a}"]`);
+        return img !== null && img.naturalWidth > 0;
+      }, alt);
+    }
+
+    await context.close();
   },
   240_000,
 );

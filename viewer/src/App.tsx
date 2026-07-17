@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
-import { approveSnapshot, ApiError, getRun, getSnapshot, listRuns } from "./api.js";
+import { approveSnapshot, ApiError, getRun, getSnapshot, imageUrl, listRuns } from "./api.js";
 import type {
   RunDetail as RunDetailData,
   RunSummary,
   SnapshotDetail as SnapshotDetailData,
-  SnapshotStatus,
 } from "./api.js";
 
 type View =
@@ -110,25 +109,19 @@ function SnapshotDetail({
   onBack: () => void;
 }) {
   const [snapshot, setSnapshot] = useState<SnapshotDetailData | null>(null);
-  const [status, setStatus] = useState<SnapshotStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [approveError, setApproveError] = useState<string | null>(null);
 
   useEffect(() => {
-    getSnapshot(runId, name).then(
-      (detail) => {
-        setSnapshot(detail);
-        setStatus(detail.status);
-      },
-      (err: Error) => setError(err.message),
-    );
+    getSnapshot(runId, name).then(setSnapshot, (err: Error) => setError(err.message));
   }, [runId, name]);
 
   async function approve() {
     setApproveError(null);
     try {
-      const result = await approveSnapshot(runId, name);
-      setStatus(result.status);
+      await approveSnapshot(runId, name);
+      const detail = await getSnapshot(runId, name);
+      setSnapshot(detail);
     } catch (err) {
       if (err instanceof ApiError) {
         setApproveError(`Approve failed (${err.status}): ${err.message}`);
@@ -145,12 +138,12 @@ function SnapshotDetail({
       {error === null && snapshot === null && <p>Loading…</p>}
       {snapshot !== null && (
         <>
-          <p>Status: {status}</p>
+          <p>Status: {snapshot.status}</p>
           <div style={{ display: "flex", gap: "1rem" }}>
             <div>
               <h2>baseline</h2>
               {snapshot.baselineUrl !== null ? (
-                <img src={snapshot.baselineUrl} alt="baseline" />
+                <img src={imageUrl(snapshot.baselineUrl)} alt="baseline" />
               ) : (
                 "not available"
               )}
@@ -158,7 +151,7 @@ function SnapshotDetail({
             <div>
               <h2>candidate</h2>
               {snapshot.candidateUrl !== null ? (
-                <img src={snapshot.candidateUrl} alt="candidate" />
+                <img src={imageUrl(snapshot.candidateUrl)} alt="candidate" />
               ) : (
                 "not available"
               )}
@@ -166,7 +159,7 @@ function SnapshotDetail({
             <div>
               <h2>diff</h2>
               {snapshot.diffUrl !== null ? (
-                <img src={snapshot.diffUrl} alt="diff" />
+                <img src={imageUrl(snapshot.diffUrl)} alt="diff" />
               ) : (
                 "not available"
               )}

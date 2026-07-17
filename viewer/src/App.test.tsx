@@ -111,16 +111,32 @@ test("snapshot detail with rendered URLs shows baseline, candidate, and diff ima
   expect(screen.queryAllByText("not available").length).toBe(0);
 });
 
-test("approve success POSTs to the approve endpoint and updates status to pass", async () => {
-  routes[`GET ${SNAPSHOT_URL}`] = { body: snapshotDetailRenderedFixture };
+test("approve success POSTs to the approve endpoint, refetches, and shows the new baseline", async () => {
+  routes[`GET ${SNAPSHOT_URL}`] = {
+    body: {
+      ...snapshotDetailRenderedFixture,
+      status: "approved-baseline-missing",
+      baselineUrl: null,
+      diffUrl: null,
+    },
+  };
   routes[`POST ${SNAPSHOT_URL}/approve`] = { body: { name: SNAPSHOT_NAME, status: "pass" } };
   await openSnapshotDetail();
-  await screen.findByText("Status: fail");
+  await screen.findByText("Status: approved-baseline-missing");
+  expect(screen.queryByAltText("baseline")).toBeNull();
+  expect(screen.getAllByText("not available").length).toBe(2); // baseline + diff panes
 
+  // After approve, the server reports "pass" with a real baseline image.
+  routes[`GET ${SNAPSHOT_URL}`] = {
+    body: { ...snapshotDetailRenderedFixture, status: "pass", diffUrl: null },
+  };
   fireEvent.click(screen.getByRole("button", { name: "Approve" }));
 
   await screen.findByText("Status: pass");
   expect(requests()).toContainEqual({ method: "POST", url: `${SNAPSHOT_URL}/approve` });
+  const detailGets = requests().filter((r) => r.method === "GET" && r.url === SNAPSHOT_URL);
+  expect(detailGets.length).toBe(2); // approve refetched the detail
+  expect(screen.getByAltText("baseline").getAttribute("src")).toMatch(/\/images\/baseline$/);
 });
 
 test("approve 501 shows the error and leaves status unchanged", async () => {
