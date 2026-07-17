@@ -156,13 +156,14 @@ def test_duplicate_name_409(client):
     assert "error" in response.get_json()
 
 
-def test_approve_501_and_404s(client):
+def test_approve_409_and_404s(client):
     example = load_example()
     run_id = create_run(client)
     client.post(f"/api/runs/{run_id}/snapshots", json=example)
 
+    # Uploaded but not yet rendered: no candidate PNG exists to promote.
     response = client.post(f"/api/runs/{run_id}/snapshots/{example['name']}/approve")
-    assert response.status_code == 501
+    assert response.status_code == 409
     assert "error" in response.get_json()
 
     response = client.post(f"/api/runs/{run_id}/snapshots/no-such-name/approve")
