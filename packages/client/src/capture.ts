@@ -32,7 +32,7 @@ function isStylesheetRel(rel: string | null): boolean {
 
 /**
  * Captures the current state of `document` as a self-contained snapshot
- * (format v0, see docs/SNAPSHOT_FORMAT.md). Never mutates the live page.
+ * (see docs/SNAPSHOT_FORMAT.md for the format and changelog). Never mutates the live page.
  *
  * Same-origin asset references (img src, url(...) in inline styles and
  * <style> elements, url(...) in linked stylesheets) are inlined as data:
