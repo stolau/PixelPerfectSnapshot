@@ -29,4 +29,5 @@ npm run test:e2e -w examples/demo-app
 
 The test resolves the flask binary as: `PPS_FLASK` env var → `backend/.venv/bin/flask` →
 `flask` on PATH. `npm test` here is a stub (no unit tests) so the root workspace test run
-stays green without Python.
+stays green without Python. `npm run lint` builds `packages/client` first (`prelint`) — the
+spec imports the package's built types.
