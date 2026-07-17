@@ -11,6 +11,9 @@ e2e tests and upload them to the backend.
   snapshot (same-origin assets inlined as `data:` URIs); never mutates the live page.
 - `sendSnapshots(snapshots, {serverUrl, runId}): Promise<void>` — sequential upload to
   `POST /api/runs/<runId>/snapshots` (see `docs/API.md`); throws on the first non-ok response.
+- `processRun({serverUrl, runId}): Promise<void>` — triggers synchronous processing of the run's
+  pending snapshots via `POST /api/runs/<runId>/process` (see `docs/API.md`); throws on a non-ok
+  response.
 - `rehydrate(snapshot, doc?): Promise<void>` — applies snapshot stylesheets, disables
   animations/transitions, and resolves once fonts and images have loaded
   (`docs/SNAPSHOT_FORMAT.md` rehydration steps 2–3); appends the `<style>` at end of `<head>`
@@ -30,7 +33,7 @@ e2e tests and upload them to the backend.
 ## Layout
 
 - `src/index.ts` — library entry point.
-- `src/capture.ts` / `src/rehydrate.ts` / `src/send.ts` — implementations.
+- `src/capture.ts` / `src/rehydrate.ts` / `src/send.ts` / `src/process.ts` — implementations.
 - `src/css-urls.ts` — pure `rewriteCssUrls` helper (unit-testable without a browser).
 - `src/capture-entry.ts` / `src/rehydrate-entry.ts` / `src/global.ts` — browser-bundle entries
   and their `window` declarations (the latter compiles to the shipped `dist/global.d.ts`).

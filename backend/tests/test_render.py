@@ -1,3 +1,4 @@
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -193,3 +194,101 @@ def test_approve_without_candidate_409(client):
 def test_process_pending_cli(app):
     result = app.test_cli_runner().invoke(args=["process-pending"])
     assert result.exit_code == 0
+
+
+def test_process_endpoint_renders_run(browser_env, app, client, monkeypatch):
+    run_a = create_run(client)
+    upload(client, run_a, make_snapshot("page-a", "#2e7d32"))
+    run_b = create_run(client)
+    upload(client, run_b, make_snapshot("page-b", "#2e7d32"))
+
+    response = client.post(f"/api/runs/{run_a}/process")
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body == client.get(f"/api/runs/{run_a}").get_json()
+    assert [s["status"] for s in body["snapshots"]] == ["approved-baseline-missing"]
+
+    # Run-scoped: run B's snapshot must be untouched.
+    run_b_body = client.get(f"/api/runs/{run_b}").get_json()
+    assert [s["status"] for s in run_b_body["snapshots"]] == ["pending"]
+
+    # Nothing pending in run A anymore: the endpoint must short-circuit before Playwright.
+    def explode():
+        raise AssertionError("sync_playwright must not be called when nothing is pending")
+
+    monkeypatch.setattr(render, "sync_playwright", explode)
+    response = client.post(f"/api/runs/{run_a}/process")
+    assert response.status_code == 200
+    assert response.get_json() == body
+
+
+def test_process_endpoint_missing_rehydrate_500(client, monkeypatch, tmp_path):
+    run_id = create_run(client)
+    upload(client, run_id, make_snapshot("page", "#2e7d32"))
+    monkeypatch.setattr(render, "REHYDRATE_JS", tmp_path / "missing" / "rehydrate.js")
+
+    response = client.post(f"/api/runs/{run_id}/process")
+    assert response.status_code == 500
+    assert "error" in response.get_json()
+    assert client.get(f"/api/runs/{run_id}/snapshots/page").get_json()["status"] == "pending"
+
+
+def test_process_pending_cli_all_runs(browser_env, app, client):
+    run_a = create_run(client)
+    upload(client, run_a, make_snapshot("page-a", "#2e7d32"))
+    run_b = create_run(client)
+    upload(client, run_b, make_snapshot("page-b", "#2e7d32"))
+
+    result = app.test_cli_runner().invoke(args=["process-pending"])
+    assert result.exit_code == 0
+    assert f"{run_a}/page-a: approved-baseline-missing" in result.output
+    assert f"{run_b}/page-b: approved-baseline-missing" in result.output
+
+    for run_id, name in ((run_a, "page-a"), (run_b, "page-b")):
+        status = client.get(f"/api/runs/{run_id}/snapshots/{name}").get_json()["status"]
+        assert status != "pending"
+
+
+def test_concurrent_write_during_processing(browser_env, app, client, tmp_path, monkeypatch):
+    # Regression proof for per-snapshot commits: before the fix, process_pending()
+    # kept one write transaction open (SQLite RESERVED lock) across the whole render
+    # loop, so any other connection writing mid-run failed with "database is locked".
+    # Pre-fix this test fails inside the wrapper's INSERT below.
+    run_id = create_run(client)
+    upload(client, run_id, make_snapshot("one", "#2e7d32"))
+    upload(client, run_id, make_snapshot("two", "#b71c1c"))
+
+    real_baseline_path = render.baseline_path
+    calls = []
+
+    def baseline_path_with_concurrent_write(data_dir, name, width, height):
+        calls.append(name)
+        if len(calls) == 2:
+            # The first snapshot's UPDATE ran already; its commit must have released
+            # the write lock. timeout=0: fail immediately instead of waiting on it.
+            conn = sqlite3.connect(tmp_path / "pps.sqlite3", timeout=0)
+            try:
+                conn.execute(
+                    "INSERT INTO runs (id, created_at) VALUES (?, ?)",
+                    ("concurrent-run", "2026-01-01T00:00:00Z"),
+                )
+                conn.commit()
+                first = conn.execute(
+                    "SELECT status FROM snapshots WHERE run_id = ? AND name = 'one'",
+                    (run_id,),
+                ).fetchone()[0]
+                assert first == "approved-baseline-missing"  # committed per snapshot
+            finally:
+                conn.close()
+        return real_baseline_path(data_dir, name, width, height)
+
+    monkeypatch.setattr(render, "baseline_path", baseline_path_with_concurrent_write)
+
+    response = client.post(f"/api/runs/{run_id}/process")
+    assert response.status_code == 200
+    assert calls == ["one", "two"]
+    statuses = {s["name"]: s["status"] for s in response.get_json()["snapshots"]}
+    assert statuses == {"one": "approved-baseline-missing", "two": "approved-baseline-missing"}
+
+    run_ids = [run["id"] for run in client.get("/api/runs").get_json()["runs"]]
+    assert "concurrent-run" in run_ids
