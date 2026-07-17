@@ -88,3 +88,20 @@ export function processRun(id: string): Promise<RunDetail> {
     method: "POST",
   });
 }
+
+export interface HistoryEntry {
+  timestamp: string;
+}
+
+export async function getSnapshotHistory(id: string, name: string): Promise<HistoryEntry[]> {
+  const body = await request<{ history: HistoryEntry[] }>(
+    `/api/runs/${encodeURIComponent(id)}/snapshots/${encodeURIComponent(name)}/history`,
+  );
+  return body.history;
+}
+
+export function historyImageUrl(id: string, name: string, timestamp: string): string {
+  return imageUrl(
+    `/api/runs/${encodeURIComponent(id)}/snapshots/${encodeURIComponent(name)}/history/${encodeURIComponent(timestamp)}`,
+  );
+}

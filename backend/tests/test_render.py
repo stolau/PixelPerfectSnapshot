@@ -188,6 +188,64 @@ def test_approve_preserves_prior_baseline_in_history(browser_env, app, client, t
     assert history_files[0].read_bytes() == v1_bytes
 
 
+def test_snapshot_history_endpoints(browser_env, app, client, tmp_path):
+    run_1 = create_run(client)
+    upload(client, run_1, make_snapshot("page", "#2e7d32"))
+    process(app)
+    assert client.post(f"/api/runs/{run_1}/snapshots/page/approve").status_code == 200
+
+    baseline_files = list((tmp_path / "baselines").glob("*.png"))
+    assert len(baseline_files) == 1
+    v1_bytes = baseline_files[0].read_bytes()  # will be archived by the 2nd approve
+
+    run_2 = create_run(client)
+    upload(client, run_2, make_snapshot("page", "#b71c1c"))
+    process(app)
+    assert client.post(f"/api/runs/{run_2}/snapshots/page/approve").status_code == 200
+
+    v2_bytes = baseline_files[0].read_bytes()  # will be archived by the 3rd approve
+    assert v2_bytes != v1_bytes
+
+    run_3 = create_run(client)
+    upload(client, run_3, make_snapshot("page", "#1565c0"))
+    process(app)
+    assert client.post(f"/api/runs/{run_3}/snapshots/page/approve").status_code == 200
+
+    v3_bytes = baseline_files[0].read_bytes()
+    assert v3_bytes not in (v1_bytes, v2_bytes)
+
+    response = client.get(f"/api/runs/{run_3}/snapshots/page/history")
+    assert response.status_code == 200
+    body = response.get_json()
+    timestamps = [entry["timestamp"] for entry in body["history"]]
+    assert len(timestamps) == 2
+    assert timestamps == sorted(timestamps, reverse=True)  # newest first
+
+    older_ts, newer_ts = sorted(timestamps)
+    history_dir = tmp_path / "baselines" / "history"
+    history_files = list(history_dir.rglob("*.png"))
+    assert len(history_files) == 2
+    bytes_by_stem = {p.stem: p.read_bytes() for p in history_files}
+    assert bytes_by_stem[older_ts] == v1_bytes  # archived by 2nd approve
+    assert bytes_by_stem[newer_ts] == v2_bytes  # archived by 3rd approve
+
+    response = client.get(f"/api/runs/{run_3}/snapshots/page/history/{newer_ts}")
+    assert response.status_code == 200
+    assert response.mimetype == "image/png"
+    assert response.data == v2_bytes
+
+    response = client.get(f"/api/runs/{run_3}/snapshots/page/history/{older_ts}")
+    assert response.status_code == 200
+    assert response.mimetype == "image/png"
+    assert response.data == v1_bytes
+
+    response = client.get(
+        f"/api/runs/{run_3}/snapshots/page/history/does-not-exist-timestamp"
+    )
+    assert response.status_code == 404
+    assert "error" in response.get_json()
+
+
 def test_visual_regression_fails(browser_env, app, client, tmp_path):
     run_id = create_run(client)
     upload(client, run_id, make_snapshot("page", "#2e7d32"))
