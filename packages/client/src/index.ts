@@ -3,7 +3,7 @@ import "./global.js";
 /** Snapshot format version this library produces. See docs/SNAPSHOT_FORMAT.md. */
 export const FORMAT_VERSION = 0;
 
-/** A captured snapshot per docs/snapshot.schema.json (format v0). */
+/** A captured snapshot per docs/snapshot.schema.json (see docs/SNAPSHOT_FORMAT.md for the format and changelog). */
 export interface Snapshot {
   formatVersion: 0;
   name: string;
