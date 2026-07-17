@@ -9,7 +9,9 @@ upload → render → diff → approve) against the real Flask backend.
   `#1a1a6e` background is the visual-regression target: the e2e test string-swaps it to
   `#c0392b` to serve a "changed" variant.
 - `e2e.test.ts` — vitest e2e suite (serves `site/`, captures with `pixelperfectsnapshot`,
-  runs the backend's `process-pending`, asserts pass/fail/approve behavior).
+  runs the backend's `process-pending`, asserts pass/fail/approve behavior). Also drives the
+  built viewer in a real browser against the live backend; `pretest:e2e` builds the viewer
+  with `VITE_API_BASE=/backend` so its requests and image srcs target the backend.
 
 ## Commands
 

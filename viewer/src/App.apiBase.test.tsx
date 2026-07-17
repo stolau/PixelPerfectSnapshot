@@ -1,0 +1,58 @@
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, expect, test, vi } from "vitest";
+import runsFixture from "./fixtures/runs.json";
+import runDetailFixture from "./fixtures/run-detail.json";
+import snapshotDetailRenderedFixture from "./fixtures/snapshot-detail-rendered.json";
+
+const RUN_ID = runDetailFixture.id; // "run-2", first (newest) entry in runs.json
+const SNAPSHOT_NAME = snapshotDetailRenderedFixture.name; // "checkout-page"
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+  vi.resetModules();
+});
+
+test("with VITE_API_BASE=/backend, API calls and image srcs carry the prefix", async () => {
+  // API_BASE is read at api.ts module scope, so stub the env before a fresh import.
+  vi.stubEnv("VITE_API_BASE", "/backend");
+  vi.resetModules();
+  const { App } = await import("./App.js");
+
+  const routes: Record<string, unknown> = {
+    "GET /backend/api/runs": runsFixture,
+    [`GET /backend/api/runs/${RUN_ID}`]: runDetailFixture,
+    [`GET /backend/api/runs/${RUN_ID}/snapshots/${SNAPSHOT_NAME}`]: snapshotDetailRenderedFixture,
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url =
+        typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const body = routes[`${init?.method ?? "GET"} ${url}`];
+      if (body === undefined) {
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+      }
+      return new Response(JSON.stringify(body), { status: 200 });
+    }),
+  );
+
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /2026-07-15T09:30:00Z/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /^checkout-page/ }));
+
+  await screen.findByText("Status: fail");
+  expect(screen.getByAltText("baseline").getAttribute("src")).toBe(
+    `/backend${snapshotDetailRenderedFixture.baselineUrl}`,
+  );
+  expect(screen.getByAltText("candidate").getAttribute("src")).toBe(
+    `/backend${snapshotDetailRenderedFixture.candidateUrl}`,
+  );
+  expect(screen.getByAltText("diff").getAttribute("src")).toBe(
+    `/backend${snapshotDetailRenderedFixture.diffUrl}`,
+  );
+  for (const img of screen.getAllByRole("img")) {
+    expect(img.getAttribute("src")).toMatch(/^\/backend\/api\//);
+  }
+});
