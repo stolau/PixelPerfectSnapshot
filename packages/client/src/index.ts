@@ -9,7 +9,7 @@ export interface Snapshot {
   name: string;
   viewport: { width: number; height: number };
   html: string;
-  stylesheets: { href: string | null; content: string }[];
+  stylesheets: { href: string; content: string }[];
 }
 
 export { captureSnapshot } from "./capture.js";

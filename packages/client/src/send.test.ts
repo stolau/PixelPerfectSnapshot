@@ -8,7 +8,7 @@ function snap(name: string): Snapshot {
     name,
     viewport: { width: 800, height: 600 },
     html: `<html><body>${name}</body></html>`,
-    stylesheets: [{ href: null, content: "body{margin:0}" }],
+    stylesheets: [{ href: "http://localhost/main.css", content: "body{margin:0}" }],
   };
 }
 
