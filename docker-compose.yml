@@ -1,0 +1,21 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      - PPS_DATA_DIR=/data
+    volumes:
+      - pps-data:/data
+
+  viewer:
+    build:
+      context: .
+      dockerfile: viewer/Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+volumes:
+  pps-data:
