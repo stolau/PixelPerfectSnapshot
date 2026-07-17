@@ -218,3 +218,45 @@ def test_env_var_data_dir(tmp_path, monkeypatch):
     response = client.post("/api/runs", json={})
     assert response.status_code == 201
     assert (tmp_path / "pps.sqlite3").exists()
+
+
+def test_cors_default_off(client):
+    response = client.get("/api/health", headers={"Origin": "https://example.com"})
+    assert response.status_code == 200
+    assert "Access-Control-Allow-Origin" not in response.headers
+
+
+def test_cors_matching_origin(tmp_path, monkeypatch):
+    monkeypatch.setenv("PPS_ALLOWED_ORIGIN", "https://a.example.com,https://b.example.com")
+    client = create_app(data_dir=tmp_path).test_client()
+
+    response = client.get("/api/health", headers={"Origin": "https://b.example.com"})
+    assert response.status_code == 200
+    assert response.headers["Access-Control-Allow-Origin"] == "https://b.example.com"
+
+
+def test_cors_non_matching_origin(tmp_path, monkeypatch):
+    monkeypatch.setenv("PPS_ALLOWED_ORIGIN", "https://a.example.com,https://b.example.com")
+    client = create_app(data_dir=tmp_path).test_client()
+
+    response = client.get("/api/health", headers={"Origin": "https://evil.example.com"})
+    assert response.status_code == 200
+    assert "Access-Control-Allow-Origin" not in response.headers
+
+
+def test_cors_preflight(tmp_path, monkeypatch):
+    monkeypatch.setenv("PPS_ALLOWED_ORIGIN", "https://a.example.com,https://b.example.com")
+    client = create_app(data_dir=tmp_path).test_client()
+    run_id = create_run(client)
+
+    response = client.options(
+        f"/api/runs/{run_id}/snapshots",
+        headers={
+            "Origin": "https://a.example.com",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "Content-Type",
+        },
+    )
+    assert response.headers["Access-Control-Allow-Origin"] == "https://a.example.com"
+    assert "POST" in response.headers["Access-Control-Allow-Methods"]
+    assert "Content-Type" in response.headers["Access-Control-Allow-Headers"]
