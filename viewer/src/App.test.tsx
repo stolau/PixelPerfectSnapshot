@@ -111,6 +111,41 @@ test("snapshot detail with rendered URLs shows baseline, candidate, and diff ima
   expect(screen.queryAllByText("not available").length).toBe(0);
 });
 
+test("process pending POSTs to the process endpoint, refetches, and updates statuses", async () => {
+  routes[`POST /api/runs/${RUN_ID}/process`] = { body: runDetailFixture };
+  await openRunDetail();
+  await screen.findByText("checkout-page — 1280x720 — pending");
+
+  const processedFixture = {
+    ...runDetailFixture,
+    snapshots: runDetailFixture.snapshots.map((s) => ({ ...s, status: "pass" })),
+  };
+  routes[`GET /api/runs/${RUN_ID}`] = { body: processedFixture };
+  fireEvent.click(screen.getByRole("button", { name: "Process pending" }));
+
+  await screen.findByText("checkout-page — 1280x720 — pass");
+  expect(requests()).toContainEqual({ method: "POST", url: `/api/runs/${RUN_ID}/process` });
+  const runGets = requests().filter(
+    (r) => r.method === "GET" && r.url === `/api/runs/${RUN_ID}`,
+  );
+  expect(runGets.length).toBe(2); // mount fetch + post-process refetch
+  expect(screen.queryByRole("button", { name: "Process pending" })).toBeNull();
+});
+
+test("process 500 shows the error and leaves statuses unchanged", async () => {
+  routes[`POST /api/runs/${RUN_ID}/process`] = {
+    status: 500,
+    body: { error: "render engine unavailable" },
+  };
+  await openRunDetail();
+  await screen.findByText("checkout-page — 1280x720 — pending");
+
+  fireEvent.click(screen.getByRole("button", { name: "Process pending" }));
+
+  await screen.findByText("Process failed (500): render engine unavailable");
+  expect(screen.getByText("checkout-page — 1280x720 — pending")).toBeDefined();
+});
+
 test("approve success POSTs to the approve endpoint, refetches, and shows the new baseline", async () => {
   routes[`GET ${SNAPSHOT_URL}`] = {
     body: {

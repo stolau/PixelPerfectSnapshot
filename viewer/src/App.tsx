@@ -1,5 +1,13 @@
 import { useEffect, useState } from "react";
-import { approveSnapshot, ApiError, getRun, getSnapshot, imageUrl, listRuns } from "./api.js";
+import {
+  approveSnapshot,
+  ApiError,
+  getRun,
+  getSnapshot,
+  imageUrl,
+  listRuns,
+  processRun,
+} from "./api.js";
 import type {
   RunDetail as RunDetailData,
   RunSummary,
@@ -73,10 +81,32 @@ function RunDetail({
 }) {
   const [run, setRun] = useState<RunDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [processing, setProcessing] = useState(false);
+  const [processError, setProcessError] = useState<string | null>(null);
 
   useEffect(() => {
     getRun(runId).then(setRun, (err: Error) => setError(err.message));
   }, [runId]);
+
+  async function process() {
+    setProcessError(null);
+    setProcessing(true);
+    try {
+      await processRun(runId);
+      const detail = await getRun(runId);
+      setRun(detail);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setProcessError(`Process failed (${err.status}): ${err.message}`);
+      } else {
+        setProcessError(`Process failed: ${(err as Error).message}`);
+      }
+    } finally {
+      setProcessing(false);
+    }
+  }
+
+  const hasPending = run !== null && run.snapshots.some((s) => s.status === "pending");
 
   return (
     <>
@@ -84,16 +114,24 @@ function RunDetail({
       {error !== null && <p>Error: {error}</p>}
       {error === null && run === null && <p>Loading…</p>}
       {run !== null && (
-        <ul>
-          {run.snapshots.map((snapshot) => (
-            <li key={snapshot.name}>
-              <button onClick={() => onSelectSnapshot(snapshot.name)}>
-                {snapshot.name} — {snapshot.viewport.width}x{snapshot.viewport.height} —{" "}
-                {snapshot.status}
-              </button>
-            </li>
-          ))}
-        </ul>
+        <>
+          {hasPending && (
+            <button onClick={process} disabled={processing}>
+              Process pending
+            </button>
+          )}
+          {processError !== null && <p>{processError}</p>}
+          <ul>
+            {run.snapshots.map((snapshot) => (
+              <li key={snapshot.name}>
+                <button onClick={() => onSelectSnapshot(snapshot.name)}>
+                  {snapshot.name} — {snapshot.viewport.width}x{snapshot.viewport.height} —{" "}
+                  {snapshot.status}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </>
   );

@@ -9,7 +9,9 @@ Consumes the backend HTTP API (`docs/API.md`).
 - `src/main.tsx` — React root bootstrap.
 - `src/App.tsx` — application root: three views with state-based navigation — run list →
   run detail → snapshot detail (baseline/candidate/diff side by side, approve button; refetches
-  the snapshot after a successful approve so the status stays fresh).
+  the snapshot after a successful approve so the status stays fresh). Run detail shows a
+  "Process pending" button when any snapshot is pending, which POSTs `/process` then refetches
+  the run (same pattern as approve's post-action refetch) before repainting statuses.
 - `src/api.ts` — typed client for the backend HTTP API (`docs/API.md`). Prefixes requests with
   `VITE_API_BASE` (empty by default; dev server proxies `/api` to `http://localhost:5000`).
   Also exports `imageUrl(path)`, which applies the same `VITE_API_BASE` prefix to image srcs.
