@@ -123,6 +123,30 @@ jobs:
             docker compose logs
             exit 1
           fi
+      - name: Upload >1MB snapshot through nginx proxy (guards client_max_body_size regression)
+        run: |
+          run_response=$(curl -s -X POST http://localhost:8080/api/runs)
+          run_id=$(echo "$run_response" | sed -n 's/.*"id": *"\([^"]*\)".*/\1/p')
+          if [ -z "$run_id" ]; then
+            echo "could not extract run id from: $run_response"
+            exit 1
+          fi
+          padding=$(head -c 1500000 /dev/zero | tr '\0' 'x')
+          printf '{"formatVersion":0,"name":"large-page","viewport":{"width":1280,"height":720},"html":"<html><body><!--%s--></body></html>","stylesheets":[]}' "$padding" > /tmp/large-snapshot.json
+          response=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:8080/api/runs/$run_id/snapshots" -H "Content-Type: application/json" --data-binary @/tmp/large-snapshot.json)
+          code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          echo "$body" | head -c 300
+          if [ "$code" = "413" ]; then
+            echo "regression: nginx rejected an upload under PPS_MAX_UPLOAD_BYTES with 413"
+            docker compose logs
+            exit 1
+          fi
+          if [ "$code" != "201" ]; then
+            echo "expected 201, got $code"
+            docker compose logs
+            exit 1
+          fi
       - name: docker compose down
         if: always()
         run: docker compose down -v

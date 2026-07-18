@@ -290,3 +290,21 @@ def test_cors_preflight(tmp_path, monkeypatch):
     assert response.headers["Access-Control-Allow-Origin"] == "https://a.example.com"
     assert "POST" in response.headers["Access-Control-Allow-Methods"]
     assert "Content-Type" in response.headers["Access-Control-Allow-Headers"]
+
+
+def test_cors_headers_on_413(tmp_path, monkeypatch):
+    monkeypatch.setenv("PPS_MAX_UPLOAD_BYTES", "100")
+    monkeypatch.setenv("PPS_ALLOWED_ORIGIN", "https://a.example.com")
+    client = create_app(data_dir=tmp_path).test_client()
+    run_id = create_run(client)
+
+    example = load_example()
+    assert len(json.dumps(example)) > 100  # sanity: payload exceeds the cap
+
+    response = client.post(
+        f"/api/runs/{run_id}/snapshots",
+        json=example,
+        headers={"Origin": "https://a.example.com"},
+    )
+    assert response.status_code == 413
+    assert response.headers["Access-Control-Allow-Origin"] == "https://a.example.com"
