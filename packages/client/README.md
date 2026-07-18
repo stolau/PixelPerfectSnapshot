@@ -13,11 +13,12 @@ npm install --save-dev pixelperfectsnapshot
 ## Usage
 
 ```ts
-import { captureSnapshot, createRun, sendSnapshots } from "pixelperfectsnapshot";
+import { captureSnapshot, createRun, processRun, sendSnapshots } from "pixelperfectsnapshot";
 
 const { id: runId } = await createRun({ serverUrl: "http://localhost:5000" });
 const snapshot = await captureSnapshot(document, "my-page");
 await sendSnapshots([snapshot], { serverUrl: "http://localhost:5000", runId });
+await processRun({ serverUrl: "http://localhost:5000", runId });
 ```
 
 ## Browser bundles

@@ -30,7 +30,8 @@ Create a run. Body: `{}` (or empty).
 Upload one snapshot. Body: a snapshot document, validated against
 [`snapshot.schema.json`](snapshot.schema.json).
 `201` → `{"name": "<name>", "status": "pending"}`
-`400` → `{"error": "<schema violation message>"}` · `404` unknown run · `409` duplicate name in run.
+`400` → `{"error": "<schema violation message>"}` · `404` unknown run · `409` duplicate name in run ·
+`413` request body exceeds the upload size cap → `{"error": "<message>"}`.
 
 ### `GET /api/runs`
 `200` — newest first (creation order descending; timestamp ties broken by creation order):
@@ -105,6 +106,12 @@ second per snapshot). No request body.
 Calling with nothing pending is a no-op returning the current run body. Concurrent calls for the
 same run may duplicate render work, but rendering is deterministic, so they converge to the same
 statuses — safe, just wasteful.
+
+In the Docker deployment, this endpoint is proxied through nginx (`viewer/nginx.conf`), which caps
+the request at 300s (≈300 pending snapshots at ~1s each) — very large runs may still exceed this and
+get a 504 from nginx even though the backend keeps processing. To process pending snapshots outside
+the request/response cycle, run `flask --app app process-pending` on the backend — note this
+processes pending snapshots across **all** runs, not just one.
 
 ## Errors
 

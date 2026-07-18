@@ -7,12 +7,14 @@ approved baselines. HTTP contract: `docs/API.md`. Upload payload contract:
 ## Layout
 
 - `app/__init__.py` — `create_app(data_dir=None)` Flask application factory. Endpoints:
-  `GET /api/health`. Registers the API blueprint, JSON 404/405 error handlers, and the
+  `GET /api/health`. Registers the API blueprint, JSON 404/405/413 error handlers, and the
   `process-pending` CLI command. Config: `PIXEL_THRESHOLD` (env `PPS_PIXEL_THRESHOLD`, default 3,
   max per-channel difference treated as noise), `MAX_DIFF_RATIO` (env `PPS_MAX_DIFF_RATIO`,
-  default 0.001, max fraction of differing pixels for a pass), and `ALLOWED_ORIGIN` (env
-  `PPS_ALLOWED_ORIGIN`, comma-separated list of origins allowed to make cross-origin requests;
-  unset → no CORS headers are sent, same-origin only).
+  default 0.001, max fraction of differing pixels for a pass), `MAX_CONTENT_LENGTH` (env
+  `PPS_MAX_UPLOAD_BYTES`, default 25 MB, Werkzeug's built-in request body size cap; oversized
+  requests get a 413), and `ALLOWED_ORIGIN` (env `PPS_ALLOWED_ORIGIN`, comma-separated list of
+  origins allowed to make cross-origin requests; unset → no CORS headers are sent, same-origin
+  only).
 - `app/api.py` — `/api` blueprint implementing `docs/API.md`: `POST /api/runs`, `GET /api/runs`,
   `GET /api/runs/<run_id>`, `POST /api/runs/<run_id>/snapshots` (schema-validated),
   `GET /api/runs/<run_id>/snapshots/<name>`,
