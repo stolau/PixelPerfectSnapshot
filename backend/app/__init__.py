@@ -15,6 +15,7 @@ def create_app(data_dir: str | os.PathLike | None = None) -> Flask:
     app.config["DATA_DIR"] = Path(data_dir)
     app.config["PIXEL_THRESHOLD"] = int(os.environ.get("PPS_PIXEL_THRESHOLD", 3))
     app.config["MAX_DIFF_RATIO"] = float(os.environ.get("PPS_MAX_DIFF_RATIO", 0.001))
+    app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("PPS_MAX_UPLOAD_BYTES", 25 * 1024 * 1024))
     allowed_origin_env = os.environ.get("PPS_ALLOWED_ORIGIN")
     app.config["ALLOWED_ORIGIN"] = (
         None
@@ -41,6 +42,10 @@ def create_app(data_dir: str | os.PathLike | None = None) -> Flask:
     @app.errorhandler(405)
     def method_not_allowed(exc) -> tuple[dict[str, str], int]:
         return {"error": "method not allowed"}, 405
+
+    @app.errorhandler(413)
+    def request_entity_too_large(exc) -> tuple[dict[str, str], int]:
+        return {"error": "request body too large"}, 413
 
     @app.after_request
     def add_cors_headers(response):
