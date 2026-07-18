@@ -14,6 +14,41 @@ pixel-diff them against human-approved baselines on a server, review and approve
 
 Each package documents its public surface in a `CODEMAP.md`.
 
+## Quickstart
+
+Add PixelPerfectSnapshot to your own e2e test suite.
+
+1. **Install the client** in your project:
+   ```sh
+   npm install --save-dev pixelperfectsnapshot
+   ```
+2. **Start the backend.** Simplest for local use — a Python venv running Flask directly:
+   ```sh
+   cd backend
+   python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
+   .venv/bin/flask --app app run   # serves on http://localhost:5000 by default
+   ```
+   (see `backend/CODEMAP.md` for the full command list). Alternatively, run
+   `docker compose up` (see "Running with Docker" below) — in that case the API is reached
+   through the viewer's proxy at `http://localhost:8080`, not `:5000`; use that as your
+   `serverUrl` instead.
+3. **Capture, upload, and process a snapshot** from your own test code (assumes the local-venv
+   backend above, reachable at `:5000`):
+   ```ts
+   import { captureSnapshot, createRun, sendSnapshots, processRun } from "pixelperfectsnapshot";
+
+   const { id: runId } = await createRun({ serverUrl: "http://localhost:5000" });
+   const snapshot = await captureSnapshot(document, "my-page");
+   await sendSnapshots([snapshot], { serverUrl: "http://localhost:5000", runId });
+   await processRun({ serverUrl: "http://localhost:5000", runId });
+   ```
+4. **Review and approve** in the viewer (`http://localhost:8080` under `docker compose up`):
+   open the run, inspect the diff, and approve a snapshot to promote it to the new baseline.
+
+For the full HTTP contract see [docs/API.md](docs/API.md), for the client's public API see
+[packages/client/README.md](packages/client/README.md), and for a complete working example see
+[examples/demo-app](examples/demo-app).
+
 ## Development
 
 ```sh
