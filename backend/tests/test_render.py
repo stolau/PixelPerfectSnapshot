@@ -426,6 +426,25 @@ def test_global_and_per_image_masks_combine(browser_env, app, client, tmp_path):
     assert process(app) == [(run_2, "page", "pass")]
 
 
+def test_http_created_global_mask_suppresses_diff(browser_env, app, client, tmp_path):
+    # The box is 20x20 = 400 differing pixels on a 320x240 (76800px) viewport,
+    # i.e. a 0.0052 ratio that exceeds the 0.001 max_diff_ratio — so without the
+    # mask this run would fail. The mask is created through the real HTTP
+    # POST /api/masks endpoint (not inserted directly into the DB), proving the
+    # new route actually flows into applicable_masks()/compare().
+    run_1 = create_run(client)
+    upload(client, run_1, make_box_snapshot("page", "box", 10, 10, 20, 20, "#204060"))
+    process(app)
+    assert client.post(f"/api/runs/{run_1}/snapshots/page/approve").status_code == 200
+
+    response = client.post("/api/masks", json={"x": 10, "y": 10, "width": 20, "height": 20})
+    assert response.status_code == 201
+
+    run_2 = create_run(client)
+    upload(client, run_2, make_box_snapshot("page", "box", 10, 10, 20, 20, "#d02040"))
+    assert process(app) == [(run_2, "page", "pass")]
+
+
 def test_masks_check_constraint_rejects_malformed_row(app, tmp_path):
     conn = sqlite3.connect(tmp_path / "pps.sqlite3")
     try:
