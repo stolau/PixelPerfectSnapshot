@@ -178,6 +178,37 @@ jobs:
             docker compose logs
             exit 1
           fi
+      - name: Upload >25MB payload through nginx proxy (proves nginx has no independent cap; backend's JSON 413 must fire, not nginx's HTML 413)
+        run: |
+          run_response=$(curl -s -X POST http://localhost:8080/api/runs)
+          run_id=$(echo "$run_response" | sed -n 's/.*"id": *"\([^"]*\)".*/\1/p')
+          if [ -z "$run_id" ]; then
+            echo "could not extract run id from: $run_response"
+            exit 1
+          fi
+          head -c 100000000 /dev/zero | tr '\0' 'x' > /tmp/huge-padding.txt
+          printf '{"formatVersion":0,"name":"huge-page","viewport":{"width":1280,"height":720},"html":"<html><body><!--' > /tmp/huge-snapshot.json
+          cat /tmp/huge-padding.txt >> /tmp/huge-snapshot.json
+          printf -- '--></body></html>","stylesheets":[]}' >> /tmp/huge-snapshot.json
+          response=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:8080/api/runs/$run_id/snapshots" -H "Content-Type: application/json" --data-binary @/tmp/huge-snapshot.json)
+          code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          echo "$body" | head -c 300
+          if [ "$code" != "413" ]; then
+            echo "expected 413 (backend's own cap), got $code -- nginx may be imposing an independent limit, or the request unexpectedly succeeded"
+            docker compose logs
+            exit 1
+          fi
+          if echo "$body" | grep -qi '<html'; then
+            echo "regression: got nginx's raw HTML 413 page instead of the backend's JSON error"
+            docker compose logs
+            exit 1
+          fi
+          if ! echo "$body" | grep -q '"error"'; then
+            echo "missing JSON error field in 413 response body"
+            docker compose logs
+            exit 1
+          fi
       - name: docker compose down
         if: always()
         run: docker compose down -v
