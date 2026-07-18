@@ -1,17 +1,25 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   approveSnapshot,
   ApiError,
+  createGlobalMask,
+  createSnapshotMask,
+  deleteGlobalMask,
+  deleteSnapshotMask,
   getRun,
   getSnapshot,
   getSnapshotHistory,
   historyImageUrl,
   imageUrl,
+  listGlobalMasks,
   listRuns,
+  listSnapshotMasks,
   processRun,
 } from "./api.js";
 import type {
   HistoryEntry,
+  Mask,
+  MaskRect,
   RunDetail as RunDetailData,
   RunSummary,
   SnapshotDetail as SnapshotDetailData,
@@ -141,6 +149,41 @@ function RunDetail({
   );
 }
 
+function resolveMaskIds(
+  rendered: MaskRect[],
+  createdMasks: {
+    scope: "global" | "per-image";
+    id: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }[],
+  globalMasks: Mask[],
+): ({ scope: "global" | "per-image"; id: number } | null)[] {
+  const rectKey = (r: { x: number; y: number; width: number; height: number }) =>
+    `${r.x},${r.y},${r.width},${r.height}`;
+
+  const poolById = new Map<
+    string,
+    { scope: "global" | "per-image"; id: number; x: number; y: number; width: number; height: number }
+  >();
+  for (const c of createdMasks) poolById.set(`${c.scope}:${c.id}`, c);
+  for (const g of globalMasks) poolById.set(`global:${g.id}`, { scope: "global", ...g });
+  const pool = [...poolById.values()];
+
+  const bindings: ({ scope: "global" | "per-image"; id: number } | null)[] = rendered.map(() => null);
+  const used = new Set<number>();
+  for (const candidate of pool) {
+    const idx = rendered.findIndex((r, i) => !used.has(i) && rectKey(r) === rectKey(candidate));
+    if (idx !== -1) {
+      used.add(idx);
+      bindings[idx] = { scope: candidate.scope, id: candidate.id };
+    }
+  }
+  return bindings;
+}
+
 function SnapshotDetail({
   runId,
   name,
@@ -155,6 +198,24 @@ function SnapshotDetail({
   const [approveError, setApproveError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[] | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [masks, setMasks] = useState<MaskRect[] | null>(null);
+  const [masksError, setMasksError] = useState<string | null>(null);
+  const [globalMasks, setGlobalMasks] = useState<Mask[] | null>(null);
+  const [createdMasks, setCreatedMasks] = useState<
+    { scope: "global" | "per-image"; id: number; x: number; y: number; width: number; height: number }[]
+  >([]);
+  const [drawStart, setDrawStart] = useState<{ x: number; y: number } | null>(null);
+  const [drawCurrent, setDrawCurrent] = useState<{ x: number; y: number } | null>(null);
+  const [pendingRect, setPendingRect] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const [imgNaturalSize, setImgNaturalSize] = useState<{ width: number; height: number } | null>(
+    null,
+  );
+  const overlayRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     getSnapshot(runId, name).then(setSnapshot, (err: Error) => setError(err.message));
@@ -163,6 +224,106 @@ function SnapshotDetail({
   useEffect(() => {
     getSnapshotHistory(runId, name).then(setHistory, (err: Error) => setHistoryError(err.message));
   }, [runId, name]);
+
+  useEffect(() => {
+    Promise.all([listSnapshotMasks(runId, name), listGlobalMasks()]).then(
+      ([snapshotMasks, global]) => {
+        setMasks(snapshotMasks);
+        setGlobalMasks(global);
+      },
+      (err: Error) => setMasksError(err.message),
+    );
+  }, [runId, name]);
+
+  async function refetchMasks(refetchGlobal: boolean) {
+    try {
+      const snapshotMasks = await listSnapshotMasks(runId, name);
+      setMasks(snapshotMasks);
+      if (refetchGlobal) {
+        const global = await listGlobalMasks();
+        setGlobalMasks(global);
+      }
+    } catch (err) {
+      setMasksError((err as Error).message);
+    }
+  }
+
+  async function createMask(scope: "global" | "per-image") {
+    if (pendingRect === null) return;
+    setMasksError(null);
+    try {
+      const response =
+        scope === "global"
+          ? await createGlobalMask(pendingRect)
+          : await createSnapshotMask(runId, name, pendingRect);
+      setCreatedMasks((prev) => [...prev, { scope, ...response }]);
+      setPendingRect(null);
+      await refetchMasks(scope === "global");
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setMasksError(`Create mask failed (${err.status}): ${err.message}`);
+      } else {
+        setMasksError(`Create mask failed: ${(err as Error).message}`);
+      }
+      setPendingRect(null);
+    }
+  }
+
+  async function deleteMask(scope: "global" | "per-image", id: number) {
+    setMasksError(null);
+    try {
+      if (scope === "global") {
+        await deleteGlobalMask(id);
+      } else {
+        await deleteSnapshotMask(runId, name, id);
+      }
+      setCreatedMasks((prev) => prev.filter((m) => !(m.scope === scope && m.id === id)));
+      await refetchMasks(scope === "global");
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setMasksError(`Delete mask failed (${err.status}): ${err.message}`);
+      } else {
+        setMasksError(`Delete mask failed: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  function handleMouseDown(e: React.MouseEvent<HTMLDivElement>) {
+    const rect = overlayRef.current?.getBoundingClientRect();
+    if (rect === undefined) return;
+    setDrawStart({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    setDrawCurrent(null);
+  }
+
+  function handleMouseMove(e: React.MouseEvent<HTMLDivElement>) {
+    if (drawStart === null) return;
+    const rect = overlayRef.current?.getBoundingClientRect();
+    if (rect === undefined) return;
+    setDrawCurrent({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+  }
+
+  function handleMouseUp() {
+    const start = drawStart;
+    const end = drawCurrent ?? drawStart;
+    setDrawStart(null);
+    setDrawCurrent(null);
+    if (start === null || end === null || imgNaturalSize === null || overlayRef.current === null) {
+      return;
+    }
+    const left = Math.min(start.x, end.x);
+    const top = Math.min(start.y, end.y);
+    const width = Math.abs(end.x - start.x);
+    const height = Math.abs(end.y - start.y);
+    if (width <= 0 || height <= 0) return;
+    const scaleX = overlayRef.current.clientWidth / imgNaturalSize.width;
+    const scaleY = overlayRef.current.clientHeight / imgNaturalSize.height;
+    setPendingRect({
+      x: Math.round(left / scaleX),
+      y: Math.round(top / scaleY),
+      width: Math.round(width / scaleX),
+      height: Math.round(height / scaleY),
+    });
+  }
 
   async function approve() {
     setApproveError(null);
@@ -201,7 +362,71 @@ function SnapshotDetail({
             <div>
               <h2>candidate</h2>
               {snapshot.candidateUrl !== null ? (
-                <img src={imageUrl(snapshot.candidateUrl)} alt="candidate" />
+                <div
+                  ref={overlayRef}
+                  data-testid="mask-overlay"
+                  style={{ position: "relative", display: "inline-block" }}
+                  onMouseDown={handleMouseDown}
+                  onMouseMove={handleMouseMove}
+                  onMouseUp={handleMouseUp}
+                >
+                  <img
+                    src={imageUrl(snapshot.candidateUrl)}
+                    alt="candidate"
+                    onLoad={(e) => {
+                      const img = e.currentTarget;
+                      setImgNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
+                    }}
+                  />
+                  {masks !== null &&
+                    imgNaturalSize !== null &&
+                    overlayRef.current !== null &&
+                    (() => {
+                      const scaleX = overlayRef.current.clientWidth / imgNaturalSize.width;
+                      const scaleY = overlayRef.current.clientHeight / imgNaturalSize.height;
+                      const bindings = resolveMaskIds(masks, createdMasks, globalMasks ?? []);
+                      return masks.map((rect, i) => {
+                        const binding = bindings[i];
+                        return (
+                          <div
+                            key={i}
+                            data-testid="mask-rect"
+                            style={{
+                              position: "absolute",
+                              left: rect.x * scaleX,
+                              top: rect.y * scaleY,
+                              width: rect.width * scaleX,
+                              height: rect.height * scaleY,
+                              background: "rgba(255,0,0,0.3)",
+                            }}
+                          >
+                            {binding !== null && (
+                              <button
+                                data-testid={`mask-delete-${binding.scope}-${binding.id}`}
+                                aria-label="Delete mask"
+                                onClick={() => deleteMask(binding.scope, binding.id)}
+                              >
+                                ×
+                              </button>
+                            )}
+                          </div>
+                        );
+                      });
+                    })()}
+                  {drawStart !== null && drawCurrent !== null && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        left: Math.min(drawStart.x, drawCurrent.x),
+                        top: Math.min(drawStart.y, drawCurrent.y),
+                        width: Math.abs(drawCurrent.x - drawStart.x),
+                        height: Math.abs(drawCurrent.y - drawStart.y),
+                        border: "1px dashed blue",
+                        pointerEvents: "none",
+                      }}
+                    />
+                  )}
+                </div>
               ) : (
                 "not available"
               )}
@@ -234,6 +459,17 @@ function SnapshotDetail({
               ))}
             </div>
           )}
+          <h2>Masks</h2>
+          {pendingRect !== null && (
+            <div data-testid="mask-scope-picker">
+              <button onClick={() => createMask("global")}>Save as global mask</button>
+              <button onClick={() => createMask("per-image")}>
+                Save as mask for this snapshot
+              </button>
+              <button onClick={() => setPendingRect(null)}>Cancel</button>
+            </div>
+          )}
+          {masksError !== null && <p>{masksError}</p>}
         </>
       )}
     </>
