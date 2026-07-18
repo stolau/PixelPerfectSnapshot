@@ -1,9 +1,10 @@
 import hashlib
 import json
+import sqlite3
 from pathlib import Path
 
 from flask import current_app
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageDraw
 from playwright.sync_api import sync_playwright
 
 from app.db import get_db
@@ -33,7 +34,12 @@ def image_path(data_dir: Path, run_id: str, snapshot_id: int, kind: str) -> Path
 
 
 def compare(
-    baseline: Path, candidate: Path, diff_out: Path, pixel_threshold: int, max_diff_ratio: float
+    baseline: Path,
+    candidate: Path,
+    diff_out: Path,
+    pixel_threshold: int,
+    max_diff_ratio: float,
+    masks: list[tuple[int, int, int, int]] = (),
 ) -> bool:
     baseline_img = Image.open(baseline).convert("RGB")
     candidate_img = Image.open(candidate).convert("RGB")
@@ -41,15 +47,29 @@ def compare(
     max_channel = channels[0]
     for channel in channels[1:]:
         max_channel = ImageChops.lighter(max_channel, channel)
-    mask = max_channel.point(lambda v: 255 if v > pixel_threshold else 0)
-    differing = mask.histogram()[255]
+    diff_mask = max_channel.point(lambda v: 255 if v > pixel_threshold else 0)
+    draw = ImageDraw.Draw(diff_mask)
+    for mx, my, mw, mh in masks:
+        draw.rectangle([mx, my, mx + mw - 1, my + mh - 1], fill=0)
+    differing = diff_mask.histogram()[255]
     white = Image.new("RGB", baseline_img.size, (255, 255, 255))
     background = Image.blend(baseline_img.convert("L").convert("RGB"), white, 0.5)
     red = Image.new("RGB", baseline_img.size, (255, 0, 0))
     diff_out.parent.mkdir(parents=True, exist_ok=True)
-    Image.composite(red, background, mask).save(diff_out)
+    Image.composite(red, background, diff_mask).save(diff_out)
     width, height = baseline_img.size
     return differing / (width * height) <= max_diff_ratio
+
+
+def applicable_masks(
+    db: sqlite3.Connection, name: str, width: int, height: int
+) -> list[tuple[int, int, int, int]]:
+    rows = db.execute(
+        "SELECT x, y, width, height FROM masks"
+        " WHERE name IS NULL OR (name = ? AND viewport_width = ? AND viewport_height = ?)",
+        (name, width, height),
+    ).fetchall()
+    return [(row["x"], row["y"], row["width"], row["height"]) for row in rows]
 
 
 def process_pending(run_id: str | None = None) -> list[tuple[str, str, str]]:
@@ -99,12 +119,16 @@ def process_pending(run_id: str | None = None) -> list[tuple[str, str, str]]:
             if not baseline.exists():
                 status = "approved-baseline-missing"
             else:
+                masks = applicable_masks(
+                    db, row["name"], row["viewport_width"], row["viewport_height"]
+                )
                 within_tolerance = compare(
                     baseline,
                     candidate,
                     image_path(data_dir, row["run_id"], row["id"], "diff"),
                     current_app.config["PIXEL_THRESHOLD"],
                     current_app.config["MAX_DIFF_RATIO"],
+                    masks,
                 )
                 status = "pass" if within_tolerance else "fail"
             db.execute("UPDATE snapshots SET status = ? WHERE id = ?", (status, row["id"]))
