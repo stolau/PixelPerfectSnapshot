@@ -267,6 +267,178 @@ def test_visual_regression_fails(browser_env, app, client, tmp_path):
     assert diff_img.getpixel((200, 200)) == (255, 0, 0)
 
 
+def make_box_snapshot(
+    name: str, box_id: str, left: int, top: int, width: int, height: int, color: str
+) -> dict:
+    return {
+        "formatVersion": 0,
+        "name": name,
+        "viewport": {"width": 320, "height": 240},
+        "html": (
+            "<!DOCTYPE html><html><head>"
+            '<link rel="stylesheet" href="http://localhost/main.css">'
+            f'</head><body><div id="{box_id}"></div></body></html>'
+        ),
+        "stylesheets": [
+            {
+                "href": "http://localhost/main.css",
+                "content": (
+                    "body{margin:0;background:#ffffff}"
+                    f"#{box_id}{{position:absolute;left:{left}px;top:{top}px;"
+                    f"width:{width}px;height:{height}px;background:{color}}}"
+                ),
+            }
+        ],
+    }
+
+
+def insert_mask(
+    tmp_path,
+    name: str | None,
+    viewport_width: int | None,
+    viewport_height: int | None,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+) -> None:
+    conn = sqlite3.connect(tmp_path / "pps.sqlite3")
+    try:
+        conn.execute(
+            "INSERT INTO masks (name, viewport_width, viewport_height, x, y, width, height)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (name, viewport_width, viewport_height, x, y, width, height),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_mask_covers_region_no_fail(browser_env, app, client, tmp_path):
+    # Baseline box is 21x20 at (10,10) — deliberately 1px wider than the 20x20 mask,
+    # to discriminate correct inclusive-corner rectangle math from an off-by-one bug.
+    run_1 = create_run(client)
+    upload(client, run_1, make_box_snapshot("page", "box", 10, 10, 21, 20, "#204060"))
+    process(app)
+    assert client.post(f"/api/runs/{run_1}/snapshots/page/approve").status_code == 200
+
+    insert_mask(tmp_path, "page", 320, 240, 10, 10, 20, 20)
+
+    run_2 = create_run(client)
+    upload(client, run_2, make_box_snapshot("page", "box", 10, 10, 21, 20, "#d02040"))
+    assert process(app) == [(run_2, "page", "pass")]
+
+    diffs = list((tmp_path / "images" / run_2).glob("*/diff.png"))
+    assert len(diffs) == 1
+    diff_img = Image.open(diffs[0]).convert("RGB")
+    # Column 30 is the box's real-diff footprint (cols 10-30) but outside the
+    # correct mask (cols 10-29) — must stay red. A buggy mask (missing the -1)
+    # would incorrectly swallow this column too.
+    assert diff_img.getpixel((30, 20)) == (255, 0, 0)
+    # Interior of the masked region must not be red.
+    assert diff_img.getpixel((20, 20)) != (255, 0, 0)
+
+
+def test_mask_outside_region_still_fails(browser_env, app, client, tmp_path):
+    run_1 = create_run(client)
+    upload(client, run_1, make_snapshot("page", "#2e7d32"))
+    process(app)
+    assert client.post(f"/api/runs/{run_1}/snapshots/page/approve").status_code == 200
+
+    # Mask sits inside the unchanged #box area (top-left 100x80); it does not
+    # overlap the differing body background region.
+    insert_mask(tmp_path, "page", 320, 240, 0, 0, 50, 50)
+
+    run_2 = create_run(client)
+    upload(client, run_2, make_snapshot("page", "#b71c1c"))
+    assert process(app) == [(run_2, "page", "fail")]
+
+    diffs = list((tmp_path / "images" / run_2).glob("*/diff.png"))
+    diff_img = Image.open(diffs[0]).convert("RGB")
+    assert diff_img.getpixel((200, 200)) == (255, 0, 0)
+
+
+def test_global_mask_applies_to_any_snapshot(browser_env, app, client, tmp_path):
+    run_1 = create_run(client)
+    upload(client, run_1, make_box_snapshot("page", "box", 10, 10, 20, 20, "#204060"))
+    process(app)
+    assert client.post(f"/api/runs/{run_1}/snapshots/page/approve").status_code == 200
+
+    # Global mask row: name/viewport are NULL, so it applies to any snapshot.
+    insert_mask(tmp_path, None, None, None, 10, 10, 20, 20)
+
+    run_2 = create_run(client)
+    upload(client, run_2, make_box_snapshot("page", "box", 10, 10, 20, 20, "#d02040"))
+    assert process(app) == [(run_2, "page", "pass")]
+
+
+def test_global_and_per_image_masks_combine(browser_env, app, client, tmp_path):
+    baseline_doc = {
+        "formatVersion": 0,
+        "name": "page",
+        "viewport": {"width": 320, "height": 240},
+        "html": (
+            "<!DOCTYPE html><html><head>"
+            '<link rel="stylesheet" href="http://localhost/main.css">'
+            '</head><body><div id="box1"></div><div id="box2"></div></body></html>'
+        ),
+        "stylesheets": [
+            {
+                "href": "http://localhost/main.css",
+                "content": (
+                    "body{margin:0;background:#ffffff}"
+                    "#box1{position:absolute;left:10px;top:10px;width:10px;height:10px;"
+                    "background:#111111}"
+                    "#box2{position:absolute;left:100px;top:100px;width:10px;height:10px;"
+                    "background:#222222}"
+                ),
+            }
+        ],
+    }
+    candidate_doc = {
+        **baseline_doc,
+        "stylesheets": [
+            {
+                "href": "http://localhost/main.css",
+                "content": (
+                    "body{margin:0;background:#ffffff}"
+                    "#box1{position:absolute;left:10px;top:10px;width:10px;height:10px;"
+                    "background:#eeeeee}"
+                    "#box2{position:absolute;left:100px;top:100px;width:10px;height:10px;"
+                    "background:#cccccc}"
+                ),
+            }
+        ],
+    }
+
+    run_1 = create_run(client)
+    upload(client, run_1, baseline_doc)
+    process(app)
+    assert client.post(f"/api/runs/{run_1}/snapshots/page/approve").status_code == 200
+
+    # Without both masks, 200 differing pixels (2x100) exceeds the 0.001 ratio
+    # (76.8px) on a 320x240 viewport, so this proves the masks must combine.
+    insert_mask(tmp_path, "page", 320, 240, 10, 10, 10, 10)  # per-image mask covers box1
+    insert_mask(tmp_path, None, None, None, 100, 100, 10, 10)  # global mask covers box2
+
+    run_2 = create_run(client)
+    upload(client, run_2, candidate_doc)
+    assert process(app) == [(run_2, "page", "pass")]
+
+
+def test_masks_check_constraint_rejects_malformed_row(app, tmp_path):
+    conn = sqlite3.connect(tmp_path / "pps.sqlite3")
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO masks (name, viewport_width, viewport_height, x, y, width, height)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("page", None, 240, 0, 0, 10, 10),
+            )
+    finally:
+        conn.close()
+
+
 def test_approve_without_candidate_409(client):
     run_id = create_run(client)
     upload(client, run_id, make_snapshot("page", "#2e7d32"))

@@ -31,8 +31,11 @@ approved baselines. HTTP contract: `docs/API.md`. Upload payload contract:
   snapshot (run-scoped when `run_id` is given; commits per snapshot) in headless Chromium
   (network aborted; injects the built `packages/client/dist/rehydrate.js`), screenshots a
   candidate PNG, and Pillow-diffs it against the approved baseline (`compare()`, always writes a
-  red-on-grayscale diff PNG). Path helpers: `baseline_path()`, `baseline_history_dir()`,
-  `baseline_history_path()`, `image_path()`.
+  red-on-grayscale diff PNG; accepts an optional `masks` list of `(x, y, width, height)` rectangles
+  that are excluded from both the diff-ratio count and the red diff-PNG rendering).
+  `applicable_masks(db, name, width, height)` looks up the `masks` rows that apply to a given
+  snapshot (its own name+viewport, plus any global rows with `name IS NULL`). Path helpers:
+  `baseline_path()`, `baseline_history_dir()`, `baseline_history_path()`, `image_path()`.
 - `app/db.py` — SQLite plumbing (stdlib `sqlite3`): schema, per-request connection via `flask.g`.
 - `tests/` — pytest suite (uses the Flask test client; also validates
   `docs/examples/example-snapshot.json` against the schema).
@@ -42,7 +45,7 @@ approved baselines. HTTP contract: `docs/API.md`. Upload payload contract:
 Data dir: `create_app(data_dir=...)` arg, else `PPS_DATA_DIR` env var, else `backend/data/`
 (gitignored). Holds:
 
-- `pps.sqlite3` — run/snapshot metadata.
+- `pps.sqlite3` — run/snapshot/mask metadata.
 - `blobs/<run_id>/<snapshot_id>.json` — uploaded snapshot documents.
 - `images/<run_id>/<snapshot_id>/{candidate,diff}.png` — rendered candidate and diff PNGs.
 - `baselines/<sha256(name\nWxH)>.png` — approved baselines, keyed globally by (name, viewport).
