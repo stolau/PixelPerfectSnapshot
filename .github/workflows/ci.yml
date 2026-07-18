@@ -147,6 +147,37 @@ jobs:
             docker compose logs
             exit 1
           fi
+      - name: Smoke test POST /api/runs/<id>/process through nginx proxy (non-root appuser + Playwright render)
+        run: |
+          run_response=$(curl -s -X POST http://localhost:8080/api/runs)
+          run_id=$(echo "$run_response" | sed -n 's/.*"id": *"\([^"]*\)".*/\1/p')
+          if [ -z "$run_id" ]; then
+            echo "could not extract run id from: $run_response"
+            docker compose logs
+            exit 1
+          fi
+          printf '{"formatVersion":0,"name":"process-smoke-page","viewport":{"width":1280,"height":720},"html":"<html><body>process smoke</body></html>","stylesheets":[]}' > /tmp/process-smoke-snapshot.json
+          response=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:8080/api/runs/$run_id/snapshots" -H "Content-Type: application/json" --data-binary @/tmp/process-smoke-snapshot.json)
+          code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          if [ "$code" != "201" ]; then
+            echo "expected 201, got $code: $body"
+            docker compose logs
+            exit 1
+          fi
+          response=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:8080/api/runs/$run_id/process")
+          code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          if [ "$code" != "200" ]; then
+            echo "expected 200, got $code: $body"
+            docker compose logs
+            exit 1
+          fi
+          if ! echo "$body" | grep -qE '"name": *"process-smoke-page".*"status": *"(pass|approved-baseline-missing)"'; then
+            echo "expected process-smoke-page status to be pass or approved-baseline-missing, got: $body"
+            docker compose logs
+            exit 1
+          fi
       - name: docker compose down
         if: always()
         run: docker compose down -v
