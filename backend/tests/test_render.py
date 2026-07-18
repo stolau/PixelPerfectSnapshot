@@ -314,7 +314,11 @@ def test_process_endpoint_missing_rehydrate_500(client, monkeypatch, tmp_path):
 
     response = client.post(f"/api/runs/{run_id}/process")
     assert response.status_code == 500
-    assert "error" in response.get_json()
+    body = response.get_json()
+    assert "error" in body
+    # Regression guard: the error must not leak the server's filesystem path.
+    assert str(tmp_path) not in body["error"]
+    assert "rehydrate.js" not in body["error"]
     assert client.get(f"/api/runs/{run_id}/snapshots/page").get_json()["status"] == "pending"
 
 

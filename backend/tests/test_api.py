@@ -237,6 +237,19 @@ def test_env_var_data_dir(tmp_path, monkeypatch):
     assert (tmp_path / "pps.sqlite3").exists()
 
 
+def test_upload_too_large_413(tmp_path, monkeypatch):
+    monkeypatch.setenv("PPS_MAX_UPLOAD_BYTES", "100")
+    client = create_app(data_dir=tmp_path).test_client()
+    run_id = create_run(client)
+
+    example = load_example()
+    assert len(json.dumps(example)) > 100  # sanity: payload exceeds the cap
+
+    response = client.post(f"/api/runs/{run_id}/snapshots", json=example)
+    assert response.status_code == 413
+    assert response.get_json() == {"error": "request body too large"}
+
+
 def test_cors_default_off(client):
     response = client.get("/api/health", headers={"Origin": "https://example.com"})
     assert response.status_code == 200

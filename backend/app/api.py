@@ -228,6 +228,7 @@ def process_run(run_id: str) -> tuple[Response, int] | dict[str, object]:
         return _error("run not found", 404)
     try:
         process_pending(run_id)
-    except FileNotFoundError as exc:
-        return _error(str(exc), 500)
+    except FileNotFoundError:
+        current_app.logger.exception("render engine unavailable while processing run %s", run_id)
+        return _error("render engine unavailable", 500)
     return get_run(run_id)

@@ -30,7 +30,8 @@ Create a run. Body: `{}` (or empty).
 Upload one snapshot. Body: a snapshot document, validated against
 [`snapshot.schema.json`](snapshot.schema.json).
 `201` → `{"name": "<name>", "status": "pending"}`
-`400` → `{"error": "<schema violation message>"}` · `404` unknown run · `409` duplicate name in run.
+`400` → `{"error": "<schema violation message>"}` · `404` unknown run · `409` duplicate name in run ·
+`413` request body exceeds the upload size cap → `{"error": "<message>"}`.
 
 ### `GET /api/runs`
 `200` — newest first (creation order descending; timestamp ties broken by creation order):
