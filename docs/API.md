@@ -19,6 +19,11 @@ work that consumes this contract. All request/response bodies are JSON unless no
   (not per run). Approving promotes a snapshot's candidate PNG to be the baseline for its key.
 - **History** — prior baseline PNGs for a (name, viewport) key, kept when a new baseline replaces
   one. Entries are identified by opaque `timestamp` strings and listed newest-first.
+- **Masks** — rectangular regions excluded from the pixel diff. Global masks (created via
+  /api/masks) apply to every snapshot; per-image masks (created via a snapshot's /masks
+  sub-resource) are keyed by (name, viewport) like baselines — not per run — so they apply to
+  every future run of that same test case. Both kinds combine additively for a given snapshot's
+  compare.
 
 ## Endpoints
 
@@ -112,6 +117,55 @@ the request at 300s (≈300 pending snapshots at ~1s each) — very large runs m
 get a 504 from nginx even though the backend keeps processing. To process pending snapshots outside
 the request/response cycle, run `flask --app app process-pending` on the backend — note this
 processes pending snapshots across **all** runs, not just one.
+
+## Masks
+
+### `GET /api/masks`
+List global masks (apply to every snapshot).
+`200`:
+```json
+{
+  "masks": [
+    {"id": 1, "x": 0, "y": 0, "width": 100, "height": 40}
+  ]
+}
+```
+
+### `POST /api/masks`
+Create a global mask. Body: `{"x", "y", "width", "height"}` (integers; `x`/`y` non-negative,
+`width`/`height` positive).
+`201` → `{"id", "x", "y", "width", "height"}`
+`400` → missing/invalid field.
+
+### `DELETE /api/masks/<mask_id>`
+Delete a global mask.
+`204` on success · `404` unknown mask id.
+
+### `GET /api/runs/<run_id>/snapshots/<name>/masks`
+List the masks that apply to this snapshot: its own per-image masks (keyed by this snapshot's
+(name, viewport)) plus all global masks, combined.
+`200`:
+```json
+{
+  "masks": [
+    {"x": 0, "y": 0, "width": 100, "height": 40}
+  ]
+}
+```
+No `id` on entries — this is the resolved, combined view used by `compare()`, not a per-row
+listing. `404` unknown run or name.
+
+### `POST /api/runs/<run_id>/snapshots/<name>/masks`
+Create a per-image mask for this snapshot's (name, viewport) key — like a baseline, it then applies
+to every future run of that same test case, not just this one. Body: same shape as
+`POST /api/masks`.
+`201` → `{"id", "x", "y", "width", "height"}`
+`400` → missing/invalid field, or the mask falls outside the snapshot's viewport
+(`x + width > viewport.width` or `y + height > viewport.height`). `404` unknown run or name.
+
+### `DELETE /api/runs/<run_id>/snapshots/<name>/masks/<mask_id>`
+Delete a per-image mask scoped to this snapshot's (name, viewport) key.
+`204` on success · `404` unknown run or name, or `mask_id` not found for this (name, viewport) key.
 
 ## Errors
 

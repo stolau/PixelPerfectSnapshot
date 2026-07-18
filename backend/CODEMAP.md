@@ -26,7 +26,17 @@ approved baselines. HTTP contract: `docs/API.md`. Upload payload contract:
   preserving the outgoing baseline under `baselines/history/`, status → `pass`; 409 if no
   candidate yet),
   `POST /api/runs/<run_id>/process` (synchronously renders the run's pending snapshots, returns
-  the `GET /api/runs/<run_id>` body; 500 if the rehydrate bundle is missing).
+  the `GET /api/runs/<run_id>` body; 500 if the rehydrate bundle is missing),
+  `GET /api/masks` / `POST /api/masks` / `DELETE /api/masks/<mask_id>` (global masks, `name IS
+  NULL`; delete 404s if the id doesn't exist among global masks),
+  `GET /api/runs/<run_id>/snapshots/<name>/masks` (the resolved, combined view via
+  `applicable_masks()` — global masks plus this snapshot's per-image masks; 404 unknown run or
+  name),
+  `POST /api/runs/<run_id>/snapshots/<name>/masks` (creates a per-image mask keyed by the
+  snapshot's (name, viewport), like a baseline — applies to every future run of that test case;
+  400 if the mask exceeds the resolved snapshot's viewport bounds; 404 unknown run or name),
+  `DELETE /api/runs/<run_id>/snapshots/<name>/masks/<mask_id>` (scoped delete by (name, viewport);
+  404 unknown run/name or mask id not in that scope).
 - `app/render.py` — render engine: `process_pending(run_id=None)` re-renders each `pending`
   snapshot (run-scoped when `run_id` is given; commits per snapshot) in headless Chromium
   (network aborted; injects the built `packages/client/dist/rehydrate.js`), screenshots a
