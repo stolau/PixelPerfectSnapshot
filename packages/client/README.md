@@ -21,6 +21,21 @@ await sendSnapshots([snapshot], { serverUrl: "http://localhost:5000", runId });
 await processRun({ serverUrl: "http://localhost:5000", runId });
 ```
 
+## Blocking elements
+
+Pass `options.blockSelectors` to blank out matching elements (content cleared, size preserved via
+inline `width`/`height`, `src` stripped) before their assets are captured:
+
+```ts
+const snapshot = await captureSnapshot(document, "my-page", {
+  blockSelectors: [".user-avatar", "#chat-widget"],
+});
+```
+
+Note: this does not strip a blocked element's own inline
+`style="background-image:url(...)"` — it is left as-is (and still inlined as a `data:` URI if
+same-origin).
+
 ## Browser bundles
 
 The package also ships two dependency-free IIFE bundles for injecting into pages

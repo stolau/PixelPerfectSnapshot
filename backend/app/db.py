@@ -16,6 +16,18 @@ CREATE TABLE IF NOT EXISTS snapshots (
     status TEXT NOT NULL DEFAULT 'pending',
     UNIQUE (run_id, name)
 );
+CREATE TABLE IF NOT EXISTS masks (
+    id INTEGER PRIMARY KEY,
+    name TEXT,
+    viewport_width INTEGER,
+    viewport_height INTEGER,
+    x INTEGER NOT NULL,
+    y INTEGER NOT NULL,
+    width INTEGER NOT NULL,
+    height INTEGER NOT NULL,
+    CHECK ((name IS NULL AND viewport_width IS NULL AND viewport_height IS NULL)
+        OR (name IS NOT NULL AND viewport_width IS NOT NULL AND viewport_height IS NOT NULL))
+);
 """
 
 

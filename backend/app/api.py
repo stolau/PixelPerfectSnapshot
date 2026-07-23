@@ -9,7 +9,14 @@ import jsonschema
 from flask import Blueprint, Response, current_app, jsonify, request, send_file, url_for
 
 from app.db import get_db
-from app.render import baseline_history_dir, baseline_history_path, baseline_path, image_path, process_pending
+from app.render import (
+    applicable_masks,
+    baseline_history_dir,
+    baseline_history_path,
+    baseline_path,
+    image_path,
+    process_pending,
+)
 
 bp = Blueprint("api", __name__, url_prefix="/api")
 
@@ -21,6 +28,18 @@ _VALIDATOR = jsonschema.Draft202012Validator(
 
 def _error(message: str, status: int) -> tuple[Response, int]:
     return jsonify({"error": message}), status
+
+
+def _validate_mask_payload(payload: object) -> str | None:
+    if not isinstance(payload, dict):
+        return "request body must be a JSON object"
+    for key in ("x", "y", "width", "height"):
+        value = payload.get(key)
+        if not isinstance(value, int) or isinstance(value, bool):
+            return "x, y, width, height are required integers"
+    if payload["x"] < 0 or payload["y"] < 0 or payload["width"] <= 0 or payload["height"] <= 0:
+        return "x and y must be non-negative; width and height must be positive"
+    return None
 
 
 def _get_run(run_id: str) -> sqlite3.Row | None:
@@ -232,3 +251,123 @@ def process_run(run_id: str) -> tuple[Response, int] | dict[str, object]:
         current_app.logger.exception("render engine unavailable while processing run %s", run_id)
         return _error("render engine unavailable", 500)
     return get_run(run_id)
+
+
+@bp.get("/masks")
+def list_masks() -> dict[str, list[dict[str, int]]]:
+    rows = get_db().execute(
+        "SELECT id, x, y, width, height FROM masks WHERE name IS NULL ORDER BY id"
+    ).fetchall()
+    return {
+        "masks": [
+            {"id": row["id"], "x": row["x"], "y": row["y"], "width": row["width"], "height": row["height"]}
+            for row in rows
+        ]
+    }
+
+
+@bp.post("/masks")
+def create_mask() -> tuple[Response, int] | tuple[dict[str, int], int]:
+    payload = request.get_json(silent=True)
+    validation_error = _validate_mask_payload(payload)
+    if validation_error is not None:
+        return _error(validation_error, 400)
+    db = get_db()
+    cursor = db.execute(
+        "INSERT INTO masks (name, viewport_width, viewport_height, x, y, width, height)"
+        " VALUES (NULL, NULL, NULL, ?, ?, ?, ?)",
+        (payload["x"], payload["y"], payload["width"], payload["height"]),
+    )
+    db.commit()
+    return {
+        "id": cursor.lastrowid,
+        "x": payload["x"],
+        "y": payload["y"],
+        "width": payload["width"],
+        "height": payload["height"],
+    }, 201
+
+
+@bp.delete("/masks/<int:mask_id>")
+def delete_mask(mask_id: int) -> tuple[Response, int] | tuple[str, int]:
+    db = get_db()
+    cursor = db.execute("DELETE FROM masks WHERE id = ? AND name IS NULL", (mask_id,))
+    db.commit()
+    if cursor.rowcount == 0:
+        return _error("mask not found", 404)
+    return "", 204
+
+
+@bp.get("/runs/<run_id>/snapshots/<name>/masks")
+def list_snapshot_masks(run_id: str, name: str) -> tuple[Response, int] | dict[str, object]:
+    if _get_run(run_id) is None:
+        return _error("run not found", 404)
+    snapshot = _get_snapshot(run_id, name)
+    if snapshot is None:
+        return _error("snapshot not found", 404)
+    masks = applicable_masks(
+        get_db(), snapshot["name"], snapshot["viewport_width"], snapshot["viewport_height"]
+    )
+    return {
+        "masks": [
+            {"x": mask[0], "y": mask[1], "width": mask[2], "height": mask[3]} for mask in masks
+        ]
+    }
+
+
+@bp.post("/runs/<run_id>/snapshots/<name>/masks")
+def create_snapshot_mask(run_id: str, name: str) -> tuple[Response, int] | tuple[dict[str, int], int]:
+    if _get_run(run_id) is None:
+        return _error("run not found", 404)
+    snapshot = _get_snapshot(run_id, name)
+    if snapshot is None:
+        return _error("snapshot not found", 404)
+    payload = request.get_json(silent=True)
+    validation_error = _validate_mask_payload(payload)
+    if validation_error is not None:
+        return _error(validation_error, 400)
+    if (
+        payload["x"] + payload["width"] > snapshot["viewport_width"]
+        or payload["y"] + payload["height"] > snapshot["viewport_height"]
+    ):
+        return _error("mask exceeds snapshot viewport bounds", 400)
+    db = get_db()
+    cursor = db.execute(
+        "INSERT INTO masks (name, viewport_width, viewport_height, x, y, width, height)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            snapshot["name"],
+            snapshot["viewport_width"],
+            snapshot["viewport_height"],
+            payload["x"],
+            payload["y"],
+            payload["width"],
+            payload["height"],
+        ),
+    )
+    db.commit()
+    return {
+        "id": cursor.lastrowid,
+        "x": payload["x"],
+        "y": payload["y"],
+        "width": payload["width"],
+        "height": payload["height"],
+    }, 201
+
+
+@bp.delete("/runs/<run_id>/snapshots/<name>/masks/<int:mask_id>")
+def delete_snapshot_mask(run_id: str, name: str, mask_id: int) -> tuple[Response, int] | tuple[str, int]:
+    if _get_run(run_id) is None:
+        return _error("run not found", 404)
+    snapshot = _get_snapshot(run_id, name)
+    if snapshot is None:
+        return _error("snapshot not found", 404)
+    db = get_db()
+    cursor = db.execute(
+        "DELETE FROM masks WHERE id = ? AND name = ? AND viewport_width = ? AND viewport_height = ?",
+        (mask_id, snapshot["name"], snapshot["viewport_width"], snapshot["viewport_height"]),
+    )
+    db.commit()
+    if cursor.rowcount == 0:
+        return _error("mask not found", 404)
+    return "", 204

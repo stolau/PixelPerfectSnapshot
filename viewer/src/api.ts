@@ -55,6 +55,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new ApiError(res.status, message);
   }
+  if (res.status === 204) {
+    return undefined as T;
+  }
   return (await res.json()) as T;
 }
 
@@ -103,5 +106,71 @@ export async function getSnapshotHistory(id: string, name: string): Promise<Hist
 export function historyImageUrl(id: string, name: string, timestamp: string): string {
   return imageUrl(
     `/api/runs/${encodeURIComponent(id)}/snapshots/${encodeURIComponent(name)}/history/${encodeURIComponent(timestamp)}`,
+  );
+}
+
+export interface Mask {
+  id: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface MaskRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export async function listGlobalMasks(): Promise<Mask[]> {
+  const body = await request<{ masks: Mask[] }>("/api/masks");
+  return body.masks;
+}
+
+export function createGlobalMask(rect: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}): Promise<Mask> {
+  return request<Mask>("/api/masks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(rect),
+  });
+}
+
+export function deleteGlobalMask(id: number): Promise<void> {
+  return request<void>(`/api/masks/${id}`, { method: "DELETE" });
+}
+
+export async function listSnapshotMasks(runId: string, name: string): Promise<MaskRect[]> {
+  const body = await request<{ masks: MaskRect[] }>(
+    `/api/runs/${encodeURIComponent(runId)}/snapshots/${encodeURIComponent(name)}/masks`,
+  );
+  return body.masks;
+}
+
+export function createSnapshotMask(
+  runId: string,
+  name: string,
+  rect: { x: number; y: number; width: number; height: number },
+): Promise<Mask> {
+  return request<Mask>(
+    `/api/runs/${encodeURIComponent(runId)}/snapshots/${encodeURIComponent(name)}/masks`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(rect),
+    },
+  );
+}
+
+export function deleteSnapshotMask(runId: string, name: string, id: number): Promise<void> {
+  return request<void>(
+    `/api/runs/${encodeURIComponent(runId)}/snapshots/${encodeURIComponent(name)}/masks/${id}`,
+    { method: "DELETE" },
   );
 }

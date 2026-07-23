@@ -7,8 +7,11 @@ e2e tests and upload them to the backend.
 
 - `FORMAT_VERSION` — snapshot format version this library produces (see `docs/SNAPSHOT_FORMAT.md`).
 - `Snapshot` — TypeScript type of a captured snapshot (mirrors `docs/snapshot.schema.json`).
-- `captureSnapshot(document, name): Promise<Snapshot>` — captures the page as a self-contained
-  snapshot (same-origin assets inlined as `data:` URIs); never mutates the live page.
+- `captureSnapshot(document, name, options?): Promise<Snapshot>` — captures the page as a
+  self-contained snapshot (same-origin assets inlined as `data:` URIs); never mutates the live
+  page. `options.blockSelectors` blanks out matching elements (content cleared, size preserved,
+  `src` stripped) before inlining; does not strip a blocked element's own inline
+  `style="background-image:url(...)"`.
 - `sendSnapshots(snapshots, {serverUrl, runId}): Promise<void>` — sequential upload to
   `POST /api/runs/<runId>/snapshots` (see `docs/API.md`); throws on the first non-ok response.
 - `processRun({serverUrl, runId}): Promise<void>` — triggers synchronous processing of the run's
@@ -28,7 +31,7 @@ e2e tests and upload them to the backend.
   `window.__ppsRehydrate(snapshot): Promise<void>`. Injected by TS tests and the Python render
   engine — the single shared rehydration implementation.
 - `dist/capture.js` — dependency-free IIFE browser bundle; installs
-  `window.__ppsCapture(document, name): Promise<Snapshot>`.
+  `window.__ppsCapture(document, name, options?): Promise<Snapshot>`.
 - `dist/global.d.ts` — `Window` augmentation for `__ppsCapture`/`__ppsRehydrate`, shipped to
   consumers via the `import "./global.js"` in the entry.
 
