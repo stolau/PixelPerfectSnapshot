@@ -6,9 +6,16 @@ diffing, and approval.
 
 ## Install
 
+Not yet published to npm. Until it is, install it locally from a checkout of this repo:
+
 ```sh
-npm install --save-dev pixelperfectsnapshot
+cd packages/client && npm install
+npm link
+# then, in your project:
+npm link pixelperfectsnapshot
 ```
+
+(Or add it as a git dependency — see "Note on monorepo / git installs" below.)
 
 ## Usage
 
