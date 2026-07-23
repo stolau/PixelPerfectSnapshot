@@ -292,6 +292,22 @@ def test_cors_preflight(tmp_path, monkeypatch):
     assert "Content-Type" in response.headers["Access-Control-Allow-Headers"]
 
 
+def test_cors_preflight_delete_only_route(tmp_path, monkeypatch):
+    monkeypatch.setenv("PPS_ALLOWED_ORIGIN", "https://a.example.com,https://b.example.com")
+    client = create_app(data_dir=tmp_path).test_client()
+
+    response = client.options(
+        "/api/masks/1",
+        headers={
+            "Origin": "https://a.example.com",
+            "Access-Control-Request-Method": "DELETE",
+            "Access-Control-Request-Headers": "Content-Type",
+        },
+    )
+    assert response.headers["Access-Control-Allow-Origin"] == "https://a.example.com"
+    assert "DELETE" in response.headers["Access-Control-Allow-Methods"]
+
+
 def upload_snapshot(client, run_id: str, doc: dict) -> None:
     response = client.post(f"/api/runs/{run_id}/snapshots", json=doc)
     assert response.status_code == 201
