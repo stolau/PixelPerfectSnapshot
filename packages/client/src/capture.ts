@@ -38,14 +38,40 @@ function isStylesheetRel(rel: string | null): boolean {
  * <style> elements, url(...) in linked stylesheets) are inlined as data:
  * URIs. Cross-origin and data:/blob: references, and references whose fetch
  * fails, are left as-is.
+ *
+ * `options.blockSelectors` blanks out matching elements (content cleared,
+ * size preserved, `src` stripped) before assets are inlined.
  */
-export async function captureSnapshot(document: Document, name: string): Promise<Snapshot> {
+export async function captureSnapshot(
+  document: Document,
+  name: string,
+  options?: { blockSelectors?: string[] },
+): Promise<Snapshot> {
   const win = document.defaultView;
   if (!win) throw new Error("captureSnapshot: document is not attached to a window");
   const origin = win.location.origin;
   const baseUrl = document.baseURI;
 
   const clone = document.documentElement.cloneNode(true) as HTMLElement;
+
+  // Blank out blocked elements: clear content, preserve size, strip src.
+  // Note: this does not strip a blocked element's own inline
+  // style="background-image:url(...)" — the [style] loop below still runs
+  // on the (now-emptied) blocked element and would inline that if present.
+  for (const selector of options?.blockSelectors ?? []) {
+    const liveEls = document.documentElement.querySelectorAll(selector);
+    const cloneEls = clone.querySelectorAll(selector);
+    const n = Math.min(liveEls.length, cloneEls.length);
+    for (let i = 0; i < n; i++) {
+      const liveEl = liveEls[i];
+      const cloneEl = cloneEls[i] as HTMLElement;
+      const rect = liveEl.getBoundingClientRect();
+      cloneEl.textContent = "";
+      cloneEl.style.width = `${rect.width}px`;
+      cloneEl.style.height = `${rect.height}px`;
+      cloneEl.removeAttribute("src");
+    }
+  }
 
   // Inline same-origin img src as data: URIs.
   for (const img of clone.querySelectorAll("img[src]")) {
