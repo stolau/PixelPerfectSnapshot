@@ -12,10 +12,14 @@ approved baselines. HTTP contract: `docs/API.md`. Upload payload contract:
   max per-channel difference treated as noise), `MAX_DIFF_RATIO` (env `PPS_MAX_DIFF_RATIO`,
   default 0.001, max fraction of differing pixels for a pass), `MAX_CONTENT_LENGTH` (env
   `PPS_MAX_UPLOAD_BYTES`, default 25 MB, Werkzeug's built-in request body size cap; oversized
-  requests get a 413), and `ALLOWED_ORIGIN` (env `PPS_ALLOWED_ORIGIN`, comma-separated list of
+  requests get a 413), `ALLOWED_ORIGIN` (env `PPS_ALLOWED_ORIGIN`, comma-separated list of
   origins allowed to make cross-origin requests; unset → no CORS headers are sent, same-origin
-  only).
-- `app/api.py` — `/api` blueprint implementing `docs/API.md`: `POST /api/runs`, `GET /api/runs`,
+  only), and `API_TOKEN` (env `PPS_API_TOKEN`; unset → auth fully off, same as today).
+- `app/api.py` — `/api` blueprint implementing `docs/API.md`. A `before_request` hook on the
+  blueprint enforces `API_TOKEN` when set: requires `Authorization: Bearer <token>` (compared with
+  `hmac.compare_digest`), returning the standard `{"error": ...}` 401 shape on a missing/malformed
+  header or mismatch; `OPTIONS` requests and `GET /api/health` (registered outside the blueprint)
+  are exempt. Routes: `POST /api/runs`, `GET /api/runs`,
   `GET /api/runs/<run_id>`, `POST /api/runs/<run_id>/snapshots` (schema-validated),
   `GET /api/runs/<run_id>/snapshots/<name>`,
   `GET /api/runs/<run_id>/snapshots/<name>/images/<kind>` (serves the PNGs; 404 until rendered),
