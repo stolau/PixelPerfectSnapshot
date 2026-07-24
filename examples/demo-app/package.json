@@ -9,7 +9,7 @@
     "test:e2e": "vitest run"
   },
   "dependencies": {
-    "pixelperfectsnapshot": "0.1.0"
+    "@stolau/pixelperfectsnapshot": "0.1.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

@@ -35,7 +35,7 @@ jobs:
       - name: npm pack sanity check
         run: |
           npm pack -w packages/client
-          tar -tzf pixelperfectsnapshot-*.tgz > pack-files.txt
+          tar -tzf stolau-pixelperfectsnapshot-*.tgz > pack-files.txt
           for f in dist/index.js dist/index.d.ts dist/global.d.ts dist/capture.js dist/rehydrate.js; do
             grep -qx "package/$f" pack-files.txt || { echo "tarball missing $f"; exit 1; }
           done

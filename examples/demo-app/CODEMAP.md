@@ -8,7 +8,7 @@ upload → render → diff → approve) against the real Flask backend.
 - `site/` — the demo page (`index.html`, `style.css`, `dot.png`). The `.box` rule's
   `#1a1a6e` background is the visual-regression target: the e2e test string-swaps it to
   `#c0392b` to serve a "changed" variant.
-- `e2e.test.ts` — vitest e2e suite (serves `site/`, captures with `pixelperfectsnapshot`,
+- `e2e.test.ts` — vitest e2e suite (serves `site/`, captures with `@stolau/pixelperfectsnapshot`,
   processes each run via `POST /api/runs/<run_id>/process`, asserts pass/fail/approve
   behavior). Also drives the
   built viewer in a real browser against the live backend; `pretest:e2e` builds the viewer
