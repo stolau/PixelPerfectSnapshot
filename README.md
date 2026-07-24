@@ -18,11 +18,9 @@ Each package documents its public surface in a `CODEMAP.md`.
 
 Add PixelPerfectSnapshot to your own e2e test suite.
 
-1. **Install the client** in your project. Not yet published to npm — see
-   `packages/client/README.md` for the interim install path (git dependency or local `npm link`).
-   Once published, it will be:
+1. **Install the client** in your project:
    ```sh
-   npm install --save-dev @stolau/pixelperfectsnapshot
+   npm install --save-dev pixelperfectsnapshot
    ```
 2. **Start the backend.** Simplest for local use — a Python venv running Flask directly:
    ```sh
@@ -37,7 +35,7 @@ Add PixelPerfectSnapshot to your own e2e test suite.
 3. **Capture, upload, and process a snapshot** from your own test code (assumes the local-venv
    backend above, reachable at `:5000`):
    ```ts
-   import { captureSnapshot, createRun, sendSnapshots, processRun } from "@stolau/pixelperfectsnapshot";
+   import { captureSnapshot, createRun, sendSnapshots, processRun } from "pixelperfectsnapshot";
 
    const { id: runId } = await createRun({ serverUrl: "http://localhost:5000" });
    const snapshot = await captureSnapshot(document, "my-page");

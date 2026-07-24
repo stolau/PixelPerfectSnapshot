@@ -1,11 +1,8 @@
 {
-  "name": "@stolau/pixelperfectsnapshot",
+  "name": "pixelperfectsnapshot",
   "version": "0.1.0",
   "description": "Capture DOM snapshots in e2e tests and upload them to a PixelPerfectSnapshot backend",
   "license": "MIT",
-  "publishConfig": {
-    "access": "public"
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/stolau/PixelPerfectSnapshot.git",
