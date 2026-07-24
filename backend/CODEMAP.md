@@ -19,16 +19,34 @@ approved baselines. HTTP contract: `docs/API.md`. Upload payload contract:
   blueprint enforces `API_TOKEN` when set: requires `Authorization: Bearer <token>` (compared with
   `hmac.compare_digest`), returning the standard `{"error": ...}` 401 shape on a missing/malformed
   header or mismatch; `OPTIONS` requests and `GET /api/health` (registered outside the blueprint)
-  are exempt. Routes: `POST /api/runs`, `GET /api/runs`,
+  are exempt. Routes: `POST /api/runs` (optional body `{"scope": {"kind": "branch"|"release", "id":
+  "<string>"}}`; omitted `scope` = unscoped, unchanged; `kind` must be exactly `branch` or
+  `release` else 400; `id` validated via `_validate_scope_id()` else 400; `kind: "release"` must
+  name an existing row in `releases` else 404 "release not found"; `scope_kind`/`scope_id` are
+  stored on the run but never appear in the response body), `GET /api/runs`,
   `GET /api/runs/<run_id>`, `POST /api/runs/<run_id>/snapshots` (schema-validated),
   `GET /api/runs/<run_id>/snapshots/<name>`,
-  `GET /api/runs/<run_id>/snapshots/<name>/images/<kind>` (serves the PNGs; 404 until rendered),
+  `GET /api/runs/<run_id>/snapshots/<name>/images/<kind>` (serves the PNGs; baseline resolution is
+  scope-aware via `scoped_baseline_read_path()`; 404 until rendered),
   `GET /api/runs/<run_id>/snapshots/<name>/history` (lists history entries newest-first),
   `GET /api/runs/<run_id>/snapshots/<name>/history/<timestamp>` (serves a history PNG; 404 unknown
-  timestamp),
-  `POST /api/runs/<run_id>/snapshots/<name>/approve` (promotes the candidate PNG to baseline,
-  preserving the outgoing baseline under `baselines/history/`, status → `pass`; 409 if no
-  candidate yet),
+  timestamp; NOTE: these two history endpoints are still unscoped — they always resolve the
+  master (name, viewport) history regardless of the run's scope; known limitation, out of scope
+  for this unit),
+  `POST /api/runs/<run_id>/snapshots/<name>/approve` (promotes the candidate PNG to the scope-aware
+  baseline via `scoped_baseline_write_path()`, preserving the outgoing baseline under the matching
+  `scoped_baseline_history_path()` when one already exists at that write path, status → `pass`; 409
+  if no candidate yet),
+  `POST /api/branches/<branch_id>/merge` (validates `branch_id` via `_validate_scope_id()`, 400 on
+  malformed; copies every `*.png` directly under `baselines/branches/<branch_id>/` onto the
+  matching master baseline path, preserving the outgoing master file under
+  `baselines/history/<hash>/` via `baseline_history_path_by_hash()` when it exists; response
+  `{"merged": [<hash>, ...], "count": n}`, 200 even when the branch has nothing to merge),
+  `POST /api/releases` (body `{"id": "<string>"}`, validated via `_validate_scope_id()`, 400 on
+  failure; 409 if a release with that id already exists, checked before any filesystem work; seeds
+  the new release's baseline directory by copying every `*.png` from the previous release's
+  directory, or from the master `baselines/` dir if this is the first release ever; response
+  `{"id", "createdAt", "seededFrom", "fileCount"}`, 201),
   `POST /api/runs/<run_id>/process` (synchronously renders the run's pending snapshots, returns
   the `GET /api/runs/<run_id>` body; 500 if the rehydrate bundle is missing),
   `GET /api/masks` / `POST /api/masks` / `DELETE /api/masks/<mask_id>` (global masks, `name IS
@@ -49,13 +67,14 @@ approved baselines. HTTP contract: `docs/API.md`. Upload payload contract:
   that are excluded from both the diff-ratio count and the red diff-PNG rendering).
   `applicable_masks(db, name, width, height)` looks up the `masks` rows that apply to a given
   snapshot (its own name+viewport, plus any global rows with `name IS NULL`). Path helpers:
-  `baseline_path()`, `baseline_history_dir()`, `baseline_history_path()`, `image_path()`, and the
-  scope-aware `scoped_baseline_write_path()` / `scoped_baseline_read_path()` /
-  `scoped_baseline_history_dir()` / `scoped_baseline_history_path()` (fall back to the unscoped
-  path helpers when `scope_kind` is `None`; branch reads fall back to the master baseline when no
-  branch-specific file exists yet). `process_pending()` is scope-aware: it joins `runs` to read
-  each snapshot's `scope_kind`/`scope_id` and resolves the baseline via
-  `scoped_baseline_read_path()`.
+  `baseline_path()`, `baseline_history_dir()`, `baseline_history_path()` (delegates to
+  `baseline_history_path_by_hash(data_dir, key, timestamp)`, the hash-keyed primitive also used
+  directly by the branch-merge endpoint), `image_path()`, and the scope-aware
+  `scoped_baseline_write_path()` / `scoped_baseline_read_path()` / `scoped_baseline_history_dir()`
+  / `scoped_baseline_history_path()` (fall back to the unscoped path helpers when `scope_kind` is
+  `None`; branch reads fall back to the master baseline when no branch-specific file exists yet).
+  `process_pending()` is scope-aware: it joins `runs` to read each snapshot's
+  `scope_kind`/`scope_id` and resolves the baseline via `scoped_baseline_read_path()`.
 - `app/db.py` — SQLite plumbing (stdlib `sqlite3`): schema, per-request connection via `flask.g`.
   `runs` has nullable `scope_kind`/`scope_id` columns (CHECK: both null or both set; `scope_kind`
   must be `branch` or `release` when set) and a `releases` table for release metadata.
@@ -75,8 +94,10 @@ Data dir: `create_app(data_dir=...)` arg, else `PPS_DATA_DIR` env var, else `bac
   kept for audit; served via the `.../history` and `.../history/<timestamp>` endpoints.
 - `baselines/branches/<scope_id>/<sha256...>.png` and `baselines/releases/<scope_id>/<sha256...>.png`
   — scoped baselines (branch/release), same (name, viewport) keying as the master baselines. Branch
-  reads fall back to the master path when no branch-specific file exists yet. Not yet wired into
-  any HTTP endpoint — the path helpers exist in `app/render.py` for a future unit to use.
+  reads fall back to the master path when no branch-specific file exists yet. Written by
+  `approve_snapshot` for runs created with a `scope`, read by `get_image`/`get_snapshot`, promoted
+  to master by `POST /api/branches/<branch_id>/merge`, and seeded from master/the prior release by
+  `POST /api/releases`.
 
 ## Commands
 
