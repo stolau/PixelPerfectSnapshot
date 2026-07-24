@@ -5,7 +5,12 @@ from flask import Flask, current_app, g
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
     id TEXT PRIMARY KEY,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    scope_kind TEXT,
+    scope_id TEXT,
+    CHECK ((scope_kind IS NULL AND scope_id IS NULL)
+        OR (scope_kind IS NOT NULL AND scope_id IS NOT NULL)),
+    CHECK (scope_kind IS NULL OR scope_kind IN ('branch', 'release'))
 );
 CREATE TABLE IF NOT EXISTS snapshots (
     id INTEGER PRIMARY KEY,
@@ -27,6 +32,10 @@ CREATE TABLE IF NOT EXISTS masks (
     height INTEGER NOT NULL,
     CHECK ((name IS NULL AND viewport_width IS NULL AND viewport_height IS NULL)
         OR (name IS NOT NULL AND viewport_width IS NOT NULL AND viewport_height IS NOT NULL))
+);
+CREATE TABLE IF NOT EXISTS releases (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL
 );
 """
 

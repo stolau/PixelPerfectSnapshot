@@ -1,5 +1,6 @@
 import hmac
 import json
+import re
 import shutil
 import sqlite3
 import uuid
@@ -14,9 +15,12 @@ from app.render import (
     applicable_masks,
     baseline_history_dir,
     baseline_history_path,
-    baseline_path,
+    baseline_history_path_by_hash,
     image_path,
     process_pending,
+    scoped_baseline_history_path,
+    scoped_baseline_read_path,
+    scoped_baseline_write_path,
 )
 
 bp = Blueprint("api", __name__, url_prefix="/api")
@@ -54,9 +58,22 @@ def _validate_mask_payload(payload: object) -> str | None:
     return None
 
 
+_SCOPE_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
+def _validate_scope_id(scope_id: object) -> str | None:
+    if not isinstance(scope_id, str) or not scope_id:
+        return "scope id must be a non-empty string"
+    if scope_id in (".", ".."):
+        return "scope id must not be '.' or '..'"
+    if not _SCOPE_ID_RE.fullmatch(scope_id):
+        return "scope id may only contain letters, digits, '.', '_', '-'"
+    return None
+
+
 def _get_run(run_id: str) -> sqlite3.Row | None:
     return get_db().execute(
-        "SELECT id, created_at FROM runs WHERE id = ?", (run_id,)
+        "SELECT id, created_at, scope_kind, scope_id FROM runs WHERE id = ?", (run_id,)
     ).fetchone()
 
 
@@ -68,23 +85,47 @@ def _get_snapshot(run_id: str, name: str) -> sqlite3.Row | None:
     ).fetchone()
 
 
-def _image_file(run_id: str, snapshot: sqlite3.Row, kind: str) -> Path:
+def _image_file(run: sqlite3.Row, snapshot: sqlite3.Row, kind: str) -> Path:
     data_dir = current_app.config["DATA_DIR"]
     if kind == "baseline":
-        return baseline_path(
-            data_dir, snapshot["name"], snapshot["viewport_width"], snapshot["viewport_height"]
+        return scoped_baseline_read_path(
+            data_dir, run["scope_kind"], run["scope_id"],
+            snapshot["name"], snapshot["viewport_width"], snapshot["viewport_height"],
         )
-    return image_path(data_dir, run_id, snapshot["id"], kind)
+    return image_path(data_dir, run["id"], snapshot["id"], kind)
 
 
 @bp.post("/runs")
-def create_run() -> tuple[dict[str, str], int]:
+def create_run() -> tuple[Response, int] | tuple[dict[str, str], int]:
+    payload = request.get_json(silent=True)
+    scope_kind = None
+    scope_id = None
+    if isinstance(payload, dict) and "scope" in payload:
+        scope = payload["scope"]
+        if not isinstance(scope, dict):
+            return _error("scope must be a JSON object", 400)
+        scope_kind = scope.get("kind")
+        if scope_kind not in ("branch", "release"):
+            return _error("scope.kind must be 'branch' or 'release'", 400)
+        scope_id = scope.get("id")
+        id_error = _validate_scope_id(scope_id)
+        if id_error is not None:
+            return _error(id_error, 400)
+        if scope_kind == "release":
+            release = get_db().execute(
+                "SELECT id FROM releases WHERE id = ?", (scope_id,)
+            ).fetchone()
+            if release is None:
+                return _error("release not found", 404)
     run_id = uuid.uuid4().hex
     created_at = (
         datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
     )
     db = get_db()
-    db.execute("INSERT INTO runs (id, created_at) VALUES (?, ?)", (run_id, created_at))
+    db.execute(
+        "INSERT INTO runs (id, created_at, scope_kind, scope_id) VALUES (?, ?, ?, ?)",
+        (run_id, created_at, scope_kind, scope_id),
+    )
     db.commit()
     return {"id": run_id, "createdAt": created_at}, 201
 
@@ -102,6 +143,44 @@ def list_runs() -> dict[str, list[dict[str, object]]]:
             for row in rows
         ]
     }
+
+
+@bp.post("/releases")
+def create_release() -> tuple[Response, int] | tuple[dict[str, object], int]:
+    payload = request.get_json(silent=True)
+    release_id = payload.get("id") if isinstance(payload, dict) else None
+    id_error = _validate_scope_id(release_id)
+    if id_error is not None:
+        return _error(id_error, 400)
+    db = get_db()
+    existing = db.execute("SELECT id FROM releases WHERE id = ?", (release_id,)).fetchone()
+    if existing is not None:
+        return _error(f"release named {release_id!r} already exists", 409)
+    data_dir = current_app.config["DATA_DIR"]
+    prior = db.execute("SELECT id FROM releases ORDER BY rowid DESC LIMIT 1").fetchone()
+    if prior is None:
+        source_dir = data_dir / "baselines"
+        seeded_from = "master"
+    else:
+        source_dir = data_dir / "baselines" / "releases" / prior["id"]
+        seeded_from = prior["id"]
+    dest_dir = data_dir / "baselines" / "releases" / release_id
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    file_count = 0
+    for source_file in sorted(source_dir.glob("*.png")):
+        shutil.copyfile(source_file, dest_dir / source_file.name)
+        file_count += 1
+    created_at = (
+        datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+    )
+    db.execute("INSERT INTO releases (id, created_at) VALUES (?, ?)", (release_id, created_at))
+    db.commit()
+    return {
+        "id": release_id,
+        "createdAt": created_at,
+        "seededFrom": seeded_from,
+        "fileCount": file_count,
+    }, 201
 
 
 @bp.post("/runs/<run_id>/snapshots")
@@ -156,14 +235,15 @@ def get_run(run_id: str) -> tuple[Response, int] | dict[str, object]:
 
 @bp.get("/runs/<run_id>/snapshots/<name>")
 def get_snapshot(run_id: str, name: str) -> tuple[Response, int] | dict[str, object]:
-    if _get_run(run_id) is None:
+    run = _get_run(run_id)
+    if run is None:
         return _error("run not found", 404)
     snapshot = _get_snapshot(run_id, name)
     if snapshot is None:
         return _error("snapshot not found", 404)
 
     def image_url(kind: str) -> str | None:
-        if not _image_file(run_id, snapshot, kind).exists():
+        if not _image_file(run, snapshot, kind).exists():
             return None
         return url_for("api.get_image", run_id=run_id, name=name, kind=kind)
 
@@ -182,12 +262,13 @@ def get_snapshot(run_id: str, name: str) -> tuple[Response, int] | dict[str, obj
 
 @bp.get("/runs/<run_id>/snapshots/<name>/images/<any(baseline,candidate,diff):kind>")
 def get_image(run_id: str, name: str, kind: str) -> Response | tuple[Response, int]:
-    if _get_run(run_id) is None:
+    run = _get_run(run_id)
+    if run is None:
         return _error("run not found", 404)
     snapshot = _get_snapshot(run_id, name)
     if snapshot is None:
         return _error("snapshot not found", 404)
-    path = _image_file(run_id, snapshot, kind)
+    path = _image_file(run, snapshot, kind)
     if not path.exists():
         return _error("image not found", 404)
     return send_file(path, mimetype="image/png")
@@ -227,20 +308,25 @@ def get_snapshot_history_image(run_id: str, name: str, timestamp: str) -> Respon
 
 @bp.post("/runs/<run_id>/snapshots/<name>/approve")
 def approve_snapshot(run_id: str, name: str) -> tuple[Response, int] | tuple[dict[str, str], int]:
-    if _get_run(run_id) is None:
+    run = _get_run(run_id)
+    if run is None:
         return _error("run not found", 404)
     snapshot = _get_snapshot(run_id, name)
     if snapshot is None:
         return _error("snapshot not found", 404)
-    candidate = _image_file(run_id, snapshot, "candidate")
+    candidate = _image_file(run, snapshot, "candidate")
     if not candidate.exists():
         return _error("no candidate image exists yet; snapshot has not been rendered", 409)
-    baseline = _image_file(run_id, snapshot, "baseline")
+    data_dir = current_app.config["DATA_DIR"]
+    baseline = scoped_baseline_write_path(
+        data_dir, run["scope_kind"], run["scope_id"],
+        snapshot["name"], snapshot["viewport_width"], snapshot["viewport_height"],
+    )
     baseline.parent.mkdir(parents=True, exist_ok=True)
     if baseline.exists():
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-        history_path = baseline_history_path(
-            current_app.config["DATA_DIR"],
+        history_path = scoped_baseline_history_path(
+            data_dir, run["scope_kind"], run["scope_id"],
             snapshot["name"], snapshot["viewport_width"], snapshot["viewport_height"],
             timestamp,
         )
@@ -251,6 +337,28 @@ def approve_snapshot(run_id: str, name: str) -> tuple[Response, int] | tuple[dic
     db.execute("UPDATE snapshots SET status = 'pass' WHERE run_id = ? AND name = ?", (run_id, name))
     db.commit()
     return {"name": name, "status": "pass"}, 200
+
+
+@bp.post("/branches/<branch_id>/merge")
+def merge_branch(branch_id: str) -> tuple[Response, int] | tuple[dict[str, object], int]:
+    id_error = _validate_scope_id(branch_id)
+    if id_error is not None:
+        return _error(id_error, 400)
+    data_dir = current_app.config["DATA_DIR"]
+    branch_dir = data_dir / "baselines" / "branches" / branch_id
+    merged = []
+    for branch_file in sorted(branch_dir.glob("*.png")):
+        key = branch_file.stem
+        master_path = data_dir / "baselines" / branch_file.name
+        if master_path.exists():
+            timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+            history_path = baseline_history_path_by_hash(data_dir, key, timestamp)
+            history_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(master_path, history_path)
+        master_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(branch_file, master_path)
+        merged.append(key)
+    return {"merged": merged, "count": len(merged)}, 200
 
 
 @bp.post("/runs/<run_id>/process")
