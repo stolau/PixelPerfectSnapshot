@@ -572,3 +572,75 @@ def test_concurrent_write_during_processing(browser_env, app, client, tmp_path, 
 
     run_ids = [run["id"] for run in client.get("/api/runs").get_json()["runs"]]
     assert "concurrent-run" in run_ids
+
+
+def insert_scoped_run(tmp_path, run_id: str, scope_kind: str, scope_id: str) -> None:
+    conn = sqlite3.connect(tmp_path / "pps.sqlite3")
+    try:
+        conn.execute(
+            "INSERT INTO runs (id, created_at, scope_kind, scope_id) VALUES (?, ?, ?, ?)",
+            (run_id, "2026-01-01T00:00:00Z", scope_kind, scope_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_process_pending_branch_scope_prefers_branch_baseline_over_master(
+    browser_env, app, client, tmp_path
+):
+    # Master baseline: approve a run with a RED body — this becomes the master
+    # baseline for "page" and would MISMATCH a green candidate.
+    master_run = create_run(client)
+    upload(client, master_run, make_snapshot("page", "#b71c1c"))
+    process(app)
+    assert client.post(f"/api/runs/{master_run}/snapshots/page/approve").status_code == 200
+
+    # Render a real GREEN "page" candidate (via a throwaway unscoped run) and use
+    # its actual candidate bytes as the branch-scoped baseline, so the branch file
+    # is guaranteed to byte-match what the scoped run will render.
+    green_run = create_run(client)
+    upload(client, green_run, make_snapshot("page", "#2e7d32"))
+    process(app)
+    green_candidates = list((tmp_path / "images" / green_run).glob("*/candidate.png"))
+    assert len(green_candidates) == 1
+    green_bytes = green_candidates[0].read_bytes()
+
+    scope_id = "feature-x"
+    branch_path = render.scoped_baseline_write_path(tmp_path, "branch", scope_id, "page", 320, 240)
+    branch_path.parent.mkdir(parents=True, exist_ok=True)
+    branch_path.write_bytes(green_bytes)
+
+    scoped_run_id = "scoped-run-branch"
+    insert_scoped_run(tmp_path, scoped_run_id, "branch", scope_id)
+    upload(client, scoped_run_id, make_snapshot("page", "#2e7d32"))
+
+    response = client.post(f"/api/runs/{scoped_run_id}/process")
+    assert response.status_code == 200
+    statuses = {s["name"]: s["status"] for s in response.get_json()["snapshots"]}
+    assert statuses == {"page": "pass"}
+
+
+def test_process_pending_branch_scope_falls_back_to_master_when_no_branch_file(
+    browser_env, app, client, tmp_path
+):
+    # Master baseline matches what the scoped run will render; no branch file
+    # is ever written, so process_pending() must fall back to the master path.
+    master_run = create_run(client)
+    upload(client, master_run, make_snapshot("page", "#2e7d32"))
+    process(app)
+    assert client.post(f"/api/runs/{master_run}/snapshots/page/approve").status_code == 200
+
+    scope_id = "feature-y"
+    scoped_run_id = "scoped-run-fallback"
+    insert_scoped_run(tmp_path, scoped_run_id, "branch", scope_id)
+    upload(client, scoped_run_id, make_snapshot("page", "#2e7d32"))
+
+    # Sanity: no branch-scoped baseline exists on disk for this scope.
+    branch_path = render.scoped_baseline_write_path(tmp_path, "branch", scope_id, "page", 320, 240)
+    assert not branch_path.exists()
+
+    response = client.post(f"/api/runs/{scoped_run_id}/process")
+    assert response.status_code == 200
+    statuses = {s["name"]: s["status"] for s in response.get_json()["snapshots"]}
+    assert statuses == {"page": "pass"}
