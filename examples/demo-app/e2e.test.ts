@@ -8,12 +8,14 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser } from "playwright";
-import { createRun, processRun, sendSnapshots, type Snapshot } from "pixelperfectsnapshot";
+import { createRun, processRun, sendSnapshots, type Snapshot } from "@stolau/pixelperfectsnapshot";
 import { afterAll, expect, test } from "vitest";
 
 const siteDir = fileURLToPath(new URL("site", import.meta.url));
 const backendDir = fileURLToPath(new URL("../../backend", import.meta.url));
-const clientDist = path.dirname(createRequire(import.meta.url).resolve("pixelperfectsnapshot"));
+const clientDist = path.dirname(
+  createRequire(import.meta.url).resolve("@stolau/pixelperfectsnapshot"),
+);
 const captureBundle = path.join(clientDist, "capture.js");
 
 const WIDTH = 480;

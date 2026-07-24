@@ -1,4 +1,4 @@
-# pixelperfectsnapshot
+# @stolau/pixelperfectsnapshot
 
 Capture DOM snapshots in e2e tests and upload them to a
 [PixelPerfectSnapshot](https://github.com/stolau/PixelPerfectSnapshot) backend for rendering,
@@ -12,7 +12,7 @@ Not yet published to npm. Until it is, install it locally from a checkout of thi
 cd packages/client && npm install
 npm link
 # then, in your project:
-npm link pixelperfectsnapshot
+npm link @stolau/pixelperfectsnapshot
 ```
 
 (Or add it as a git dependency — see "Note on monorepo / git installs" below.)
@@ -20,7 +20,7 @@ npm link pixelperfectsnapshot
 ## Usage
 
 ```ts
-import { captureSnapshot, createRun, processRun, sendSnapshots } from "pixelperfectsnapshot";
+import { captureSnapshot, createRun, processRun, sendSnapshots } from "@stolau/pixelperfectsnapshot";
 
 const { id: runId } = await createRun({ serverUrl: "http://localhost:5000" });
 const snapshot = await captureSnapshot(document, "my-page");
