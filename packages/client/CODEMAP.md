@@ -12,13 +12,16 @@ e2e tests and upload them to the backend.
   page. `options.blockSelectors` blanks out matching elements (content cleared, size preserved,
   `src` stripped) before inlining; does not strip a blocked element's own inline
   `style="background-image:url(...)"`.
-- `sendSnapshots(snapshots, {serverUrl, runId}): Promise<void>` — sequential upload to
+- `sendSnapshots(snapshots, {serverUrl?, runId}): Promise<void>` — sequential upload to
   `POST /api/runs/<runId>/snapshots` (see `docs/API.md`); throws on the first non-ok response.
-- `processRun({serverUrl, runId}): Promise<void>` — triggers synchronous processing of the run's
+- `processRun({serverUrl?, runId}): Promise<void>` — triggers synchronous processing of the run's
   pending snapshots via `POST /api/runs/<runId>/process` (see `docs/API.md`); throws on a non-ok
   response.
-- `createRun({serverUrl}): Promise<{id: string, createdAt: string}>` — creates a new run via
+- `createRun({serverUrl?}): Promise<{id: string, createdAt: string}>` — creates a new run via
   `POST /api/runs` (see `docs/API.md`); throws on a non-ok response.
+- `serverUrl` on `sendSnapshots`/`processRun`/`createRun` is optional: falls back to
+  `process.env.PPS_SERVER_URL` when omitted, throws a clear `Error` if neither is set. An
+  explicitly-passed `serverUrl` always wins over the env var.
 - `rehydrate(snapshot, doc?): Promise<void>` — applies snapshot stylesheets, disables
   animations/transitions, and resolves once fonts and images have loaded
   (`docs/SNAPSHOT_FORMAT.md` rehydration steps 2–3); appends the `<style>` at end of `<head>`
