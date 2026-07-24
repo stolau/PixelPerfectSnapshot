@@ -25,6 +25,20 @@ work that consumes this contract. All request/response bodies are JSON unless no
   every future run of that same test case. Both kinds combine additively for a given snapshot's
   compare.
 
+## Authentication
+
+Optional shared-secret authentication, off by default. Set `PPS_API_TOKEN` on the backend to
+require every request under `/api/*` (except `OPTIONS` preflight) to include:
+
+```
+Authorization: Bearer <token>
+```
+
+Missing header, malformed header, or a mismatched token → `401` → `{"error": "<message>"}`.
+`GET /api/health` is exempt. When `PPS_API_TOKEN` is unset, no authentication is required —
+matches this project's existing opt-in-via-env-var convention (e.g. `PPS_ALLOWED_ORIGIN` for
+CORS).
+
 ## Endpoints
 
 ### `POST /api/runs`
