@@ -5,6 +5,7 @@ const OPTS = { serverUrl: "http://localhost:8080" };
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 test("POSTs once to the runs URL and resolves to the created run", async () => {
@@ -36,4 +37,81 @@ test("throws on a non-2xx response with the status and body text in the message"
   expect(err).toBeInstanceOf(Error);
   expect(err!.message).toContain("500");
   expect(err!.message).toContain('{"error":"boom"}');
+});
+
+test("an explicit serverUrl wins even when PPS_SERVER_URL is also set", async () => {
+  vi.stubEnv("PPS_SERVER_URL", "http://env-server");
+  const calls: string[] = [];
+  vi.stubGlobal("fetch", async (url: string) => {
+    calls.push(url);
+    return new Response('{"id":"run-1","createdAt":"2026-01-01T00:00:00Z"}', { status: 201 });
+  });
+
+  await createRun(OPTS);
+
+  expect(calls[0]).toBe("http://localhost:8080/api/runs");
+});
+
+test("falls back to PPS_SERVER_URL when opts.serverUrl is omitted", async () => {
+  vi.stubEnv("PPS_SERVER_URL", "http://env-server");
+  const calls: string[] = [];
+  vi.stubGlobal("fetch", async (url: string) => {
+    calls.push(url);
+    return new Response('{"id":"run-1","createdAt":"2026-01-01T00:00:00Z"}', { status: 201 });
+  });
+
+  await createRun({});
+
+  expect(calls[0]).toBe("http://env-server/api/runs");
+});
+
+test("throws a clear error when neither opts.serverUrl nor PPS_SERVER_URL is set", async () => {
+  vi.stubEnv("PPS_SERVER_URL", undefined);
+
+  const err = await createRun({}).then(
+    () => null,
+    (e: unknown) => e as Error,
+  );
+  expect(err).toBeInstanceOf(Error);
+  expect(err!.message).toContain("serverUrl");
+  expect(err!.message).toContain("PPS_SERVER_URL");
+});
+
+test("sends no Authorization header when neither opts.token nor PPS_API_TOKEN is set", async () => {
+  vi.stubEnv("PPS_API_TOKEN", undefined);
+  const calls: { init: RequestInit }[] = [];
+  vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+    calls.push({ init });
+    return new Response('{"id":"run-1","createdAt":"2026-01-01T00:00:00Z"}', { status: 201 });
+  });
+
+  await createRun(OPTS);
+
+  expect(calls[0].init.headers).toBeUndefined();
+});
+
+test("an explicit token wins even when PPS_API_TOKEN is also set", async () => {
+  vi.stubEnv("PPS_API_TOKEN", "env-token");
+  const calls: { init: RequestInit }[] = [];
+  vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+    calls.push({ init });
+    return new Response('{"id":"run-1","createdAt":"2026-01-01T00:00:00Z"}', { status: 201 });
+  });
+
+  await createRun({ ...OPTS, token: "explicit-token" });
+
+  expect(calls[0].init.headers).toEqual({ Authorization: "Bearer explicit-token" });
+});
+
+test("falls back to PPS_API_TOKEN when opts.token is omitted", async () => {
+  vi.stubEnv("PPS_API_TOKEN", "env-token");
+  const calls: { init: RequestInit }[] = [];
+  vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+    calls.push({ init });
+    return new Response('{"id":"run-1","createdAt":"2026-01-01T00:00:00Z"}', { status: 201 });
+  });
+
+  await createRun(OPTS);
+
+  expect(calls[0].init.headers).toEqual({ Authorization: "Bearer env-token" });
 });

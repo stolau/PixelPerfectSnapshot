@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import runsFixture from "./fixtures/runs.json";
 import runDetailFixture from "./fixtures/run-detail.json";
@@ -20,39 +20,51 @@ test("with VITE_API_BASE=/backend, API calls and image srcs carry the prefix", a
   vi.resetModules();
   const { App } = await import("./App.js");
 
-  const routes: Record<string, unknown> = {
-    "GET /backend/api/runs": runsFixture,
-    [`GET /backend/api/runs/${RUN_ID}`]: runDetailFixture,
-    [`GET /backend/api/runs/${RUN_ID}/snapshots/${SNAPSHOT_NAME}`]: snapshotDetailRenderedFixture,
+  const routes: Record<string, { body?: unknown; blob?: boolean }> = {
+    "GET /backend/api/runs": { body: runsFixture },
+    [`GET /backend/api/runs/${RUN_ID}`]: { body: runDetailFixture },
+    [`GET /backend/api/runs/${RUN_ID}/snapshots/${SNAPSHOT_NAME}`]: {
+      body: snapshotDetailRenderedFixture,
+    },
+    [`GET /backend${snapshotDetailRenderedFixture.baselineUrl}`]: { blob: true },
+    [`GET /backend${snapshotDetailRenderedFixture.candidateUrl}`]: { blob: true },
+    [`GET /backend${snapshotDetailRenderedFixture.diffUrl}`]: { blob: true },
   };
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const fetchMock = vi.fn(
+    async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url =
         typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-      const body = routes[`${init?.method ?? "GET"} ${url}`];
-      if (body === undefined) {
+      const route = routes[`${init?.method ?? "GET"} ${url}`];
+      if (route === undefined) {
         return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       }
-      return new Response(JSON.stringify(body), { status: 200 });
-    }),
+      if (route.blob === true) {
+        return new Response(new Blob(["fake-image-bytes"]), { status: 200 });
+      }
+      return new Response(JSON.stringify(route.body), { status: 200 });
+    },
   );
+  vi.stubGlobal("fetch", fetchMock);
 
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: /2026-07-15T09:30:00Z/ }));
   fireEvent.click(await screen.findByRole("button", { name: /^checkout-page/ }));
 
   await screen.findByText("Status: fail");
-  expect(screen.getByAltText("baseline").getAttribute("src")).toBe(
+  // The rendered <img> src becomes a blob: object URL (see AuthenticatedImage); what proves the
+  // prefix was actually applied is the underlying fetch URL.
+  await waitFor(() => {
+    for (const img of screen.getAllByRole("img")) {
+      expect(img.getAttribute("src")).toMatch(/^blob:/);
+    }
+  });
+  expect(fetchMock.mock.calls.map((c) => c[0])).toContain(
     `/backend${snapshotDetailRenderedFixture.baselineUrl}`,
   );
-  expect(screen.getByAltText("candidate").getAttribute("src")).toBe(
+  expect(fetchMock.mock.calls.map((c) => c[0])).toContain(
     `/backend${snapshotDetailRenderedFixture.candidateUrl}`,
   );
-  expect(screen.getByAltText("diff").getAttribute("src")).toBe(
+  expect(fetchMock.mock.calls.map((c) => c[0])).toContain(
     `/backend${snapshotDetailRenderedFixture.diffUrl}`,
   );
-  for (const img of screen.getAllByRole("img")) {
-    expect(img.getAttribute("src")).toMatch(/^\/backend\/api\//);
-  }
 });

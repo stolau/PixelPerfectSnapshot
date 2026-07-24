@@ -16,6 +16,7 @@ const OPTS = { serverUrl: "http://localhost:8080", runId: "run/1 2" };
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 test("POSTs each snapshot as JSON to the run's snapshots URL with the runId encoded", async () => {
@@ -79,4 +80,87 @@ test("throws on a non-2xx response with the status and the body text in the mess
   expect(err!.message).toContain("dup");
   // Failed first upload stops the batch.
   expect(urls).toHaveLength(1);
+});
+
+test("an explicit serverUrl wins even when PPS_SERVER_URL is also set", async () => {
+  vi.stubEnv("PPS_SERVER_URL", "http://env-server");
+  const urls: string[] = [];
+  vi.stubGlobal("fetch", async (url: string) => {
+    urls.push(url);
+    return new Response('{"name":"x","status":"pending"}', { status: 201 });
+  });
+
+  await sendSnapshots([snap("a")], OPTS);
+
+  expect(urls[0]).toBe("http://localhost:8080/api/runs/run%2F1%202/snapshots");
+});
+
+test("falls back to PPS_SERVER_URL when opts.serverUrl is omitted", async () => {
+  vi.stubEnv("PPS_SERVER_URL", "http://env-server");
+  const urls: string[] = [];
+  vi.stubGlobal("fetch", async (url: string) => {
+    urls.push(url);
+    return new Response('{"name":"x","status":"pending"}', { status: 201 });
+  });
+
+  await sendSnapshots([snap("a")], { runId: OPTS.runId });
+
+  expect(urls[0]).toBe("http://env-server/api/runs/run%2F1%202/snapshots");
+});
+
+test("throws a clear error when neither opts.serverUrl nor PPS_SERVER_URL is set", async () => {
+  vi.stubEnv("PPS_SERVER_URL", undefined);
+
+  const err = await sendSnapshots([snap("a")], { runId: OPTS.runId }).then(
+    () => null,
+    (e: unknown) => e as Error,
+  );
+  expect(err).toBeInstanceOf(Error);
+  expect(err!.message).toContain("serverUrl");
+  expect(err!.message).toContain("PPS_SERVER_URL");
+});
+
+test("sends no Authorization header when neither opts.token nor PPS_API_TOKEN is set", async () => {
+  vi.stubEnv("PPS_API_TOKEN", undefined);
+  const calls: { init: RequestInit }[] = [];
+  vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+    calls.push({ init });
+    return new Response('{"name":"x","status":"pending"}', { status: 201 });
+  });
+
+  await sendSnapshots([snap("a")], OPTS);
+
+  expect(calls[0].init.headers).toEqual({ "Content-Type": "application/json" });
+});
+
+test("an explicit token wins even when PPS_API_TOKEN is also set, merged with Content-Type", async () => {
+  vi.stubEnv("PPS_API_TOKEN", "env-token");
+  const calls: { init: RequestInit }[] = [];
+  vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+    calls.push({ init });
+    return new Response('{"name":"x","status":"pending"}', { status: 201 });
+  });
+
+  await sendSnapshots([snap("a")], { ...OPTS, token: "explicit-token" });
+
+  expect(calls[0].init.headers).toEqual({
+    "Content-Type": "application/json",
+    Authorization: "Bearer explicit-token",
+  });
+});
+
+test("falls back to PPS_API_TOKEN when opts.token is omitted, merged with Content-Type", async () => {
+  vi.stubEnv("PPS_API_TOKEN", "env-token");
+  const calls: { init: RequestInit }[] = [];
+  vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+    calls.push({ init });
+    return new Response('{"name":"x","status":"pending"}', { status: 201 });
+  });
+
+  await sendSnapshots([snap("a")], OPTS);
+
+  expect(calls[0].init.headers).toEqual({
+    "Content-Type": "application/json",
+    Authorization: "Bearer env-token",
+  });
 });

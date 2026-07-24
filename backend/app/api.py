@@ -1,3 +1,4 @@
+import hmac
 import json
 import shutil
 import sqlite3
@@ -28,6 +29,17 @@ _VALIDATOR = jsonschema.Draft202012Validator(
 
 def _error(message: str, status: int) -> tuple[Response, int]:
     return jsonify({"error": message}), status
+
+
+@bp.before_request
+def _require_api_token() -> tuple[Response, int] | None:
+    token = current_app.config["API_TOKEN"]
+    if token is None or request.method == "OPTIONS":
+        return None
+    scheme, _, credential = request.headers.get("Authorization", "").partition(" ")
+    if scheme != "Bearer" or not credential or not hmac.compare_digest(credential, token):
+        return _error("missing or invalid Authorization header", 401)
+    return None
 
 
 def _validate_mask_payload(payload: object) -> str | None:

@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App.js";
+import { AuthenticatedImage } from "./AuthenticatedImage.js";
+import { setAuthToken } from "./authToken.js";
 import runsFixture from "./fixtures/runs.json";
 import runDetailFixture from "./fixtures/run-detail.json";
 import snapshotDetailFixture from "./fixtures/snapshot-detail.json";
@@ -13,7 +15,13 @@ const SNAPSHOT_URL = `/api/runs/${RUN_ID}/snapshots/${SNAPSHOT_NAME}`;
 
 interface Route {
   status?: number;
-  body: unknown;
+  body?: unknown;
+  /** When true, respond with a Blob body instead of JSON — for AuthenticatedImage fetches. */
+  blob?: boolean;
+}
+
+function blobRoute(status?: number): Route {
+  return { blob: true, status };
 }
 
 let routes: Record<string, Route>;
@@ -27,6 +35,11 @@ beforeEach(() => {
     [`GET ${SNAPSHOT_URL}/history`]: { body: { history: [] } },
     [`GET ${SNAPSHOT_URL}/masks`]: { body: { masks: [] } },
     "GET /api/masks": { body: { masks: [] } },
+    // AuthenticatedImage fetches these directly; most tests that swap in the rendered snapshot
+    // fixture render baseline/candidate/diff images and need them to resolve successfully.
+    [`GET ${snapshotDetailRenderedFixture.baselineUrl}`]: blobRoute(),
+    [`GET ${snapshotDetailRenderedFixture.candidateUrl}`]: blobRoute(),
+    [`GET ${snapshotDetailRenderedFixture.diffUrl}`]: blobRoute(),
   };
   fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url =
@@ -36,6 +49,9 @@ beforeEach(() => {
     if (route === undefined) {
       return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
     }
+    if (route.blob === true) {
+      return new Response(new Blob(["fake-image-bytes"]), { status: route.status ?? 200 });
+    }
     return new Response(JSON.stringify(route.body), { status: route.status ?? 200 });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -44,6 +60,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  sessionStorage.clear();
 });
 
 /** Every (method, url) pair the app actually sent. */
@@ -182,9 +199,22 @@ test("snapshot detail with rendered URLs shows baseline, candidate, and diff ima
   await screen.findByText("Status: fail");
   const images = screen.getAllByRole("img");
   expect(images.length).toBe(3);
-  expect(screen.getByAltText("baseline").getAttribute("src")).toMatch(/\/images\/baseline$/);
-  expect(screen.getByAltText("candidate").getAttribute("src")).toMatch(/\/images\/candidate$/);
-  expect(screen.getByAltText("diff").getAttribute("src")).toMatch(/\/images\/diff$/);
+  // The rendered <img> src is a blob: object URL (see AuthenticatedImage); what actually proves
+  // the right resource was requested is the underlying authenticated fetch.
+  await waitFor(() => {
+    expect(screen.getByAltText("baseline").getAttribute("src")).toMatch(/^blob:/);
+    expect(screen.getByAltText("candidate").getAttribute("src")).toMatch(/^blob:/);
+    expect(screen.getByAltText("diff").getAttribute("src")).toMatch(/^blob:/);
+  });
+  expect(requests()).toContainEqual({
+    method: "GET",
+    url: snapshotDetailRenderedFixture.baselineUrl,
+  });
+  expect(requests()).toContainEqual({
+    method: "GET",
+    url: snapshotDetailRenderedFixture.candidateUrl,
+  });
+  expect(requests()).toContainEqual({ method: "GET", url: snapshotDetailRenderedFixture.diffUrl });
   expect(screen.queryAllByText("not available").length).toBe(0);
 });
 
@@ -248,7 +278,13 @@ test("approve success POSTs to the approve endpoint, refetches, and shows the ne
   expect(requests()).toContainEqual({ method: "POST", url: `${SNAPSHOT_URL}/approve` });
   const detailGets = requests().filter((r) => r.method === "GET" && r.url === SNAPSHOT_URL);
   expect(detailGets.length).toBe(2); // approve refetched the detail
-  expect(screen.getByAltText("baseline").getAttribute("src")).toMatch(/\/images\/baseline$/);
+  await waitFor(() => {
+    expect(screen.getByAltText("baseline").getAttribute("src")).toMatch(/^blob:/);
+  });
+  expect(requests()).toContainEqual({
+    method: "GET",
+    url: snapshotDetailRenderedFixture.baselineUrl,
+  });
 });
 
 test("approve 501 shows the error and leaves status unchanged", async () => {
@@ -269,9 +305,12 @@ test("approve 501 shows the error and leaves status unchanged", async () => {
 
 test("snapshot detail renders history entries newest-first with correct image URLs", async () => {
   routes[`GET ${SNAPSHOT_URL}/history`] = { body: snapshotHistoryFixture };
+  const timestamps = snapshotHistoryFixture.history.map((entry) => entry.timestamp);
+  for (const ts of timestamps) {
+    routes[`GET ${SNAPSHOT_URL}/history/${ts}`] = blobRoute();
+  }
   await openSnapshotDetail();
 
-  const timestamps = snapshotHistoryFixture.history.map((entry) => entry.timestamp);
   // The fixture itself must be newest-first, matching the API contract.
   expect(timestamps).toEqual([...timestamps].sort().reverse());
 
@@ -281,8 +320,15 @@ test("snapshot detail renders history entries newest-first with correct image UR
 
   const images = screen.getAllByAltText(/^history /);
   expect(images.length).toBe(timestamps.length);
-  images.forEach((img, i) => {
-    expect(img.getAttribute("src")).toBe(`${SNAPSHOT_URL}/history/${timestamps[i]}`);
+  // The rendered <img> src is a blob: object URL (see AuthenticatedImage); what actually proves
+  // the right resource was requested is the underlying authenticated fetch.
+  await waitFor(() => {
+    images.forEach((img) => {
+      expect(img.getAttribute("src")).toMatch(/^blob:/);
+    });
+  });
+  timestamps.forEach((ts) => {
+    expect(requests()).toContainEqual({ method: "GET", url: `${SNAPSHOT_URL}/history/${ts}` });
   });
 
   // Entries render in the same (newest-first) order the API provided them.
@@ -479,4 +525,80 @@ test("create mask failure surfaces the ApiError message and clears the pending r
   } finally {
     restoreLayout();
   }
+});
+
+test("saving the auth token via the UI adds an Authorization header to subsequent API calls", async () => {
+  render(<App />);
+  fireEvent.change(screen.getByLabelText("Auth token"), { target: { value: "secret-token" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save token" }));
+
+  fireEvent.click(await screen.findByRole("button", { name: /2026-07-15T09:30:00Z/ }));
+  await screen.findByText("checkout-page — 1280x720 — pending");
+
+  const call = fetchMock.mock.calls.find((c) => c[0] === `/api/runs/${RUN_ID}`);
+  expect(call).toBeDefined();
+  const headers = (call![1] as RequestInit).headers as Record<string, string>;
+  expect(headers.Authorization).toBe("Bearer secret-token");
+});
+
+test("clearing the auth token removes the Authorization header from subsequent API calls", async () => {
+  setAuthToken("stale-token");
+  render(<App />);
+  expect(screen.getByLabelText("Auth token")).toHaveProperty("value", "stale-token");
+
+  fireEvent.click(screen.getByRole("button", { name: "Clear token" }));
+  fireEvent.click(await screen.findByRole("button", { name: /2026-07-15T09:30:00Z/ }));
+  await screen.findByText("checkout-page — 1280x720 — pending");
+
+  const call = fetchMock.mock.calls.find((c) => c[0] === `/api/runs/${RUN_ID}`);
+  expect(call).toBeDefined();
+  const headers = (call![1] as RequestInit | undefined)?.headers as
+    | Record<string, string>
+    | undefined;
+  expect(headers?.Authorization).toBeUndefined();
+});
+
+test("AuthenticatedImage fetches with the auth header, renders via an object URL, and revokes it on src change and unmount", async () => {
+  routes["GET /img/one"] = blobRoute();
+  routes["GET /img/two"] = blobRoute();
+  setAuthToken("iso-token");
+
+  const { rerender, unmount } = render(<AuthenticatedImage src="/img/one" alt="test" />);
+
+  await waitFor(() => {
+    expect(screen.getByAltText("test").getAttribute("src")).toMatch(/^blob:/);
+  });
+  const firstCall = fetchMock.mock.calls.find((c) => c[0] === "/img/one");
+  expect(firstCall).toBeDefined();
+  expect((firstCall![1] as RequestInit).headers).toMatchObject({
+    Authorization: "Bearer iso-token",
+  });
+  expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+
+  rerender(<AuthenticatedImage src="/img/two" alt="test" />);
+  await waitFor(() => {
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
+  });
+  await waitFor(() => {
+    expect(screen.getByAltText("test").getAttribute("src")).toMatch(/^blob:/);
+  });
+
+  unmount();
+  await waitFor(() => {
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2);
+  });
+});
+
+test("a 401 on an image fetch surfaces a visible error pointing at the token field", async () => {
+  routes[`GET ${SNAPSHOT_URL}`] = { body: snapshotDetailRenderedFixture };
+  routes[`GET ${snapshotDetailRenderedFixture.baselineUrl}`] = blobRoute(401);
+  await openSnapshotDetail();
+
+  await screen.findByText("Status: fail");
+  await screen.findByText("Image failed to load — check your auth token above");
+  expect(screen.queryByAltText("baseline")).toBeNull();
+  // The other panes, unaffected, still load normally.
+  await waitFor(() => {
+    expect(screen.getByAltText("candidate").getAttribute("src")).toMatch(/^blob:/);
+  });
 });
