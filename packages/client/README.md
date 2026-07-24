@@ -23,6 +23,9 @@ await sendSnapshots([snapshot], { serverUrl: "http://localhost:5000", runId });
 await processRun({ serverUrl: "http://localhost:5000", runId });
 ```
 
+`serverUrl` is optional on `createRun`, `sendSnapshots`, and `processRun` — if omitted, it falls
+back to the `PPS_SERVER_URL` environment variable; an error is thrown if neither is set.
+
 ## Blocking elements
 
 Pass `options.blockSelectors` to blank out matching elements (content cleared, size preserved via
