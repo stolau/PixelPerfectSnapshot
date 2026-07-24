@@ -26,6 +26,11 @@ await processRun({ serverUrl: "http://localhost:5000", runId });
 `serverUrl` is optional on `createRun`, `sendSnapshots`, and `processRun` — if omitted, it falls
 back to the `PPS_SERVER_URL` environment variable; an error is thrown if neither is set.
 
+`token` is also optional on `createRun`, `sendSnapshots`, and `processRun` — if omitted, it falls
+back to the `PPS_API_TOKEN` environment variable. Unlike `serverUrl`, it's fine for neither to be
+set (the request is just sent without an `Authorization` header, e.g. against a backend with auth
+off); when a token is resolved, it's sent as `Authorization: Bearer <token>`.
+
 ## Blocking elements
 
 Pass `options.blockSelectors` to blank out matching elements (content cleared, size preserved via

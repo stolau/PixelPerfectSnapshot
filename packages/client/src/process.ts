@@ -5,12 +5,18 @@
  *
  * `opts.serverUrl` falls back to `process.env.PPS_SERVER_URL` when omitted; throws if
  * neither is provided.
+ *
+ * `opts.token` falls back to `process.env.PPS_API_TOKEN` when omitted; if neither is set, no
+ * `Authorization` header is sent (valid when the backend has auth off).
  */
-export async function processRun(opts: { serverUrl?: string; runId: string }): Promise<void> {
+export async function processRun(
+  opts: { serverUrl?: string; runId: string; token?: string },
+): Promise<void> {
   const serverUrl = resolveServerUrl(opts.serverUrl);
+  const token = resolveToken(opts.token);
   const res = await fetch(
     `${serverUrl}/api/runs/${encodeURIComponent(opts.runId)}/process`,
-    { method: "POST" },
+    { method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : undefined },
   );
   if (!res.ok) {
     const body = await res.text();
@@ -26,4 +32,8 @@ function resolveServerUrl(explicit: string | undefined): string {
     );
   }
   return serverUrl;
+}
+
+function resolveToken(explicit: string | undefined): string | undefined {
+  return explicit ?? process.env.PPS_API_TOKEN;
 }
