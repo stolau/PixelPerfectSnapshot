@@ -1,5 +1,6 @@
 import hmac
 import json
+import re
 import shutil
 import sqlite3
 import uuid
@@ -51,6 +52,19 @@ def _validate_mask_payload(payload: object) -> str | None:
             return "x, y, width, height are required integers"
     if payload["x"] < 0 or payload["y"] < 0 or payload["width"] <= 0 or payload["height"] <= 0:
         return "x and y must be non-negative; width and height must be positive"
+    return None
+
+
+_SCOPE_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
+def _validate_scope_id(scope_id: object) -> str | None:
+    if not isinstance(scope_id, str) or not scope_id:
+        return "scope id must be a non-empty string"
+    if scope_id in (".", ".."):
+        return "scope id must not be '.' or '..'"
+    if not _SCOPE_ID_RE.fullmatch(scope_id):
+        return "scope id may only contain letters, digits, '.', '_', '-'"
     return None
 
 

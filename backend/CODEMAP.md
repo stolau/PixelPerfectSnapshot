@@ -49,8 +49,16 @@ approved baselines. HTTP contract: `docs/API.md`. Upload payload contract:
   that are excluded from both the diff-ratio count and the red diff-PNG rendering).
   `applicable_masks(db, name, width, height)` looks up the `masks` rows that apply to a given
   snapshot (its own name+viewport, plus any global rows with `name IS NULL`). Path helpers:
-  `baseline_path()`, `baseline_history_dir()`, `baseline_history_path()`, `image_path()`.
+  `baseline_path()`, `baseline_history_dir()`, `baseline_history_path()`, `image_path()`, and the
+  scope-aware `scoped_baseline_write_path()` / `scoped_baseline_read_path()` /
+  `scoped_baseline_history_dir()` / `scoped_baseline_history_path()` (fall back to the unscoped
+  path helpers when `scope_kind` is `None`; branch reads fall back to the master baseline when no
+  branch-specific file exists yet). `process_pending()` is scope-aware: it joins `runs` to read
+  each snapshot's `scope_kind`/`scope_id` and resolves the baseline via
+  `scoped_baseline_read_path()`.
 - `app/db.py` — SQLite plumbing (stdlib `sqlite3`): schema, per-request connection via `flask.g`.
+  `runs` has nullable `scope_kind`/`scope_id` columns (CHECK: both null or both set; `scope_kind`
+  must be `branch` or `release` when set) and a `releases` table for release metadata.
 - `tests/` — pytest suite (uses the Flask test client; also validates
   `docs/examples/example-snapshot.json` against the schema).
 
@@ -65,6 +73,10 @@ Data dir: `create_app(data_dir=...)` arg, else `PPS_DATA_DIR` env var, else `bac
 - `baselines/<sha256(name\nWxH)>.png` — approved baselines, keyed globally by (name, viewport).
 - `baselines/history/<sha256...>/<timestamp>.png` — baseline PNGs displaced by a later approve,
   kept for audit; served via the `.../history` and `.../history/<timestamp>` endpoints.
+- `baselines/branches/<scope_id>/<sha256...>.png` and `baselines/releases/<scope_id>/<sha256...>.png`
+  — scoped baselines (branch/release), same (name, viewport) keying as the master baselines. Branch
+  reads fall back to the master path when no branch-specific file exists yet. Not yet wired into
+  any HTTP endpoint — the path helpers exist in `app/render.py` for a future unit to use.
 
 ## Commands
 

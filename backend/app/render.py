@@ -29,6 +29,53 @@ def baseline_history_path(data_dir: Path, name: str, width: int, height: int, ti
     return baseline_history_dir(data_dir, name, width, height) / f"{timestamp}.png"
 
 
+def _scope_dir(data_dir: Path, scope_kind: str, scope_id: str) -> Path:
+    if scope_kind == "branch":
+        return data_dir / "baselines" / "branches" / scope_id
+    if scope_kind == "release":
+        return data_dir / "baselines" / "releases" / scope_id
+    raise ValueError(f"unknown scope_kind: {scope_kind!r}")
+
+
+def scoped_baseline_write_path(
+    data_dir: Path, scope_kind: str | None, scope_id: str | None,
+    name: str, width: int, height: int,
+) -> Path:
+    if scope_kind is None:
+        return baseline_path(data_dir, name, width, height)
+    key = hashlib.sha256(f"{name}\n{width}x{height}".encode()).hexdigest()
+    return _scope_dir(data_dir, scope_kind, scope_id) / f"{key}.png"
+
+
+def scoped_baseline_read_path(
+    data_dir: Path, scope_kind: str | None, scope_id: str | None,
+    name: str, width: int, height: int,
+) -> Path:
+    if scope_kind != "branch":
+        return scoped_baseline_write_path(data_dir, scope_kind, scope_id, name, width, height)
+    branch_path = scoped_baseline_write_path(data_dir, "branch", scope_id, name, width, height)
+    return branch_path if branch_path.exists() else baseline_path(data_dir, name, width, height)
+
+
+def scoped_baseline_history_dir(
+    data_dir: Path, scope_kind: str | None, scope_id: str | None,
+    name: str, width: int, height: int,
+) -> Path:
+    if scope_kind is None:
+        return baseline_history_dir(data_dir, name, width, height)
+    key = hashlib.sha256(f"{name}\n{width}x{height}".encode()).hexdigest()
+    return _scope_dir(data_dir, scope_kind, scope_id) / "history" / key
+
+
+def scoped_baseline_history_path(
+    data_dir: Path, scope_kind: str | None, scope_id: str | None,
+    name: str, width: int, height: int, timestamp: str,
+) -> Path:
+    return scoped_baseline_history_dir(
+        data_dir, scope_kind, scope_id, name, width, height
+    ) / f"{timestamp}.png"
+
+
 def image_path(data_dir: Path, run_id: str, snapshot_id: int, kind: str) -> Path:
     return data_dir / "images" / run_id / str(snapshot_id) / f"{kind}.png"
 
@@ -75,14 +122,17 @@ def applicable_masks(
 def process_pending(run_id: str | None = None) -> list[tuple[str, str, str]]:
     db = get_db()
     query = (
-        "SELECT id, run_id, name, viewport_width, viewport_height"
-        " FROM snapshots WHERE status = 'pending'"
+        "SELECT snapshots.id AS id, snapshots.run_id AS run_id, snapshots.name AS name,"
+        " snapshots.viewport_width AS viewport_width, snapshots.viewport_height AS viewport_height,"
+        " runs.scope_kind AS scope_kind, runs.scope_id AS scope_id"
+        " FROM snapshots JOIN runs ON runs.id = snapshots.run_id"
+        " WHERE snapshots.status = 'pending'"
     )
     params: tuple[str, ...] = ()
     if run_id is not None:
-        query += " AND run_id = ?"
+        query += " AND snapshots.run_id = ?"
         params = (run_id,)
-    rows = db.execute(query + " ORDER BY id", params).fetchall()
+    rows = db.execute(query + " ORDER BY snapshots.id", params).fetchall()
     if not rows:
         return []
     if not REHYDRATE_JS.exists():
@@ -113,8 +163,9 @@ def process_pending(run_id: str | None = None) -> list[tuple[str, str, str]]:
             page.evaluate(_DOUBLE_RAF)
             page.screenshot(path=str(candidate))
             context.close()
-            baseline = baseline_path(
-                data_dir, row["name"], row["viewport_width"], row["viewport_height"]
+            baseline = scoped_baseline_read_path(
+                data_dir, row["scope_kind"], row["scope_id"],
+                row["name"], row["viewport_width"], row["viewport_height"],
             )
             if not baseline.exists():
                 status = "approved-baseline-missing"
