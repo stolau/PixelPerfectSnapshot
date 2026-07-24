@@ -24,6 +24,8 @@ import type {
   RunSummary,
   SnapshotDetail as SnapshotDetailData,
 } from "./api.js";
+import { AuthenticatedImage } from "./AuthenticatedImage.js";
+import { getAuthToken, setAuthToken } from "./authToken.js";
 
 type View =
   | { kind: "runs" }
@@ -36,6 +38,7 @@ export function App() {
   return (
     <>
       <h1>PixelPerfectSnapshot</h1>
+      <AuthTokenInput />
       {view.kind === "runs" && (
         <RunList onSelectRun={(runId) => setView({ kind: "run", runId })} />
       )}
@@ -54,6 +57,34 @@ export function App() {
         />
       )}
     </>
+  );
+}
+
+function AuthTokenInput() {
+  const [token, setToken] = useState(() => getAuthToken() ?? "");
+
+  function save() {
+    setAuthToken(token);
+  }
+
+  function clear() {
+    setToken("");
+    setAuthToken(null);
+  }
+
+  return (
+    <div>
+      <label>
+        Auth token:{" "}
+        <input
+          type="password"
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          aria-label="Auth token"
+        />
+      </label>{" "}
+      <button onClick={save}>Save token</button> <button onClick={clear}>Clear token</button>
+    </div>
   );
 }
 
@@ -354,7 +385,7 @@ function SnapshotDetail({
             <div>
               <h2>baseline</h2>
               {snapshot.baselineUrl !== null ? (
-                <img src={imageUrl(snapshot.baselineUrl)} alt="baseline" />
+                <AuthenticatedImage src={imageUrl(snapshot.baselineUrl)} alt="baseline" />
               ) : (
                 "not available"
               )}
@@ -370,7 +401,7 @@ function SnapshotDetail({
                   onMouseMove={handleMouseMove}
                   onMouseUp={handleMouseUp}
                 >
-                  <img
+                  <AuthenticatedImage
                     src={imageUrl(snapshot.candidateUrl)}
                     alt="candidate"
                     onLoad={(e) => {
@@ -434,7 +465,7 @@ function SnapshotDetail({
             <div>
               <h2>diff</h2>
               {snapshot.diffUrl !== null ? (
-                <img src={imageUrl(snapshot.diffUrl)} alt="diff" />
+                <AuthenticatedImage src={imageUrl(snapshot.diffUrl)} alt="diff" />
               ) : (
                 "not available"
               )}
@@ -450,7 +481,7 @@ function SnapshotDetail({
             <div style={{ display: "flex", gap: "1rem" }}>
               {history.map((entry) => (
                 <div key={entry.timestamp}>
-                  <img
+                  <AuthenticatedImage
                     src={historyImageUrl(runId, name, entry.timestamp)}
                     alt={`history ${entry.timestamp}`}
                   />
