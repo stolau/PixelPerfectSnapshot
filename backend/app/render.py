@@ -25,8 +25,13 @@ def baseline_history_dir(data_dir: Path, name: str, width: int, height: int) -> 
     return data_dir / "baselines" / "history" / key
 
 
+def baseline_history_path_by_hash(data_dir: Path, key: str, timestamp: str) -> Path:
+    return data_dir / "baselines" / "history" / key / f"{timestamp}.png"
+
+
 def baseline_history_path(data_dir: Path, name: str, width: int, height: int, timestamp: str) -> Path:
-    return baseline_history_dir(data_dir, name, width, height) / f"{timestamp}.png"
+    key = hashlib.sha256(f"{name}\n{width}x{height}".encode()).hexdigest()
+    return baseline_history_path_by_hash(data_dir, key, timestamp)
 
 
 def _scope_dir(data_dir: Path, scope_kind: str, scope_id: str) -> Path:

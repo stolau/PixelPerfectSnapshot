@@ -1,3 +1,4 @@
+import hashlib
 import sqlite3
 
 import pytest
@@ -149,6 +150,14 @@ def test_release_history_path_shape(tmp_path):
     unscoped_key = render.baseline_history_dir(tmp_path, "page", 320, 240).name
     assert key_dir == tmp_path / "baselines" / "releases" / "v1" / "history" / unscoped_key
     assert path == key_dir / f"{ts}.png"
+
+
+def test_baseline_history_path_by_hash_matches_baseline_history_path(tmp_path):
+    ts = "20260101T000000000000Z"
+    key = hashlib.sha256(b"page\n320x240").hexdigest()
+    assert render.baseline_history_path_by_hash(tmp_path, key, ts) == render.baseline_history_path(
+        tmp_path, "page", 320, 240, ts
+    )
 
 
 # --- runs table CHECK constraints ------------------------------------------
