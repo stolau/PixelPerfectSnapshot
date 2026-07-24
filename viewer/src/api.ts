@@ -1,3 +1,5 @@
+import { authHeaders } from "./authToken.js";
+
 export type SnapshotStatus = "pending" | "pass" | "fail" | "approved-baseline-missing";
 
 export interface Viewport {
@@ -42,7 +44,10 @@ export function imageUrl(path: string): string {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, init);
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: { ...authHeaders(), ...init?.headers },
+  });
   if (!res.ok) {
     let message = res.statusText;
     try {
