@@ -13,9 +13,9 @@ def create_app(data_dir: str | os.PathLike | None = None) -> Flask:
     if data_dir is None:
         data_dir = os.environ.get("PPS_DATA_DIR") or Path(__file__).resolve().parents[1] / "data"
     app.config["DATA_DIR"] = Path(data_dir)
-    app.config["PIXEL_THRESHOLD"] = int(os.environ.get("PPS_PIXEL_THRESHOLD", 3))
-    app.config["MAX_DIFF_RATIO"] = float(os.environ.get("PPS_MAX_DIFF_RATIO", 0.001))
-    app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("PPS_MAX_UPLOAD_BYTES", 25 * 1024 * 1024))
+    app.config["PIXEL_THRESHOLD"] = int(os.environ.get("PPS_PIXEL_THRESHOLD", "3"))
+    app.config["MAX_DIFF_RATIO"] = float(os.environ.get("PPS_MAX_DIFF_RATIO", "0.001"))
+    app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("PPS_MAX_UPLOAD_BYTES", str(25 * 1024 * 1024)))
     allowed_origin_env = os.environ.get("PPS_ALLOWED_ORIGIN")
     app.config["ALLOWED_ORIGIN"] = (
         None

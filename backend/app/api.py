@@ -2,7 +2,7 @@ import json
 import shutil
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import jsonschema
@@ -69,7 +69,7 @@ def _image_file(run_id: str, snapshot: sqlite3.Row, kind: str) -> Path:
 def create_run() -> tuple[dict[str, str], int]:
     run_id = uuid.uuid4().hex
     created_at = (
-        datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+        datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
     )
     db = get_db()
     db.execute("INSERT INTO runs (id, created_at) VALUES (?, ?)", (run_id, created_at))
@@ -226,7 +226,7 @@ def approve_snapshot(run_id: str, name: str) -> tuple[Response, int] | tuple[dic
     baseline = _image_file(run_id, snapshot, "baseline")
     baseline.parent.mkdir(parents=True, exist_ok=True)
     if baseline.exists():
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
         history_path = baseline_history_path(
             current_app.config["DATA_DIR"],
             snapshot["name"], snapshot["viewport_width"], snapshot["viewport_height"],
