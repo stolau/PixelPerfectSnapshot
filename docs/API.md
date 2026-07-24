@@ -24,6 +24,20 @@ work that consumes this contract. All request/response bodies are JSON unless no
   sub-resource) are keyed by (name, viewport) like baselines — not per run — so they apply to
   every future run of that same test case. Both kinds combine additively for a given snapshot's
   compare.
+- **Baseline scoping (branch / master / release)** — a run may optionally set `scope` to compare
+  against and approve into an isolated baseline set instead of the single global one (master):
+  - **master** (default, no `scope`) — today's behavior: one shared baseline per (name, viewport).
+  - **branch** (`scope: {"kind": "branch", "id": "<string>"}`) — reads fall back to master
+    wherever the branch hasn't approved its own baseline yet; approvals always write to the
+    branch's own baseline, never to master. `POST /api/branches/<id>/merge` promotes a branch's
+    approved baselines to master. A branch has no creation step — it springs into existence on
+    first approve, identified purely by its `id`.
+  - **release** (`scope: {"kind": "release", "id": "<string>"}`) — created via `POST /api/releases`
+    ("cutting" a release), which seeds it from master's current baselines (if no prior release
+    exists) or from the immediately prior release's own baselines (if one does) — never from
+    master once a prior release exists. Reads and approvals always target the release's own
+    baselines, with no fallback. This is what makes a release compare against "the last release
+    build," not master.
 
 ## Authentication
 
@@ -42,8 +56,12 @@ CORS).
 ## Endpoints
 
 ### `POST /api/runs`
-Create a run. Body: `{}` (or empty).
+Create a run. Body: `{}` (or empty), or `{"scope": {"kind": "branch"|"release", "id": "<string>"}}`
+to scope this run — see **Baseline scoping** above. `id` must be non-empty and match
+`^[A-Za-z0-9_.-]+$` (not `.` or `..`).
 `201` → `{"id": "<run-id>", "createdAt": "<ISO 8601 UTC>"}`
+`400` → invalid `scope.kind` or `scope.id` → `{"error": "<message>"}`.
+`404` → `scope.kind` is `"release"` and no release with that `id` exists.
 
 ### `POST /api/runs/<run_id>/snapshots`
 Upload one snapshot. Body: a snapshot document, validated against
@@ -112,7 +130,8 @@ exist (e.g. before the render engine has processed the snapshot).
 
 ### `POST /api/runs/<run_id>/snapshots/<name>/approve`
 Promote this snapshot's candidate PNG to be the approved baseline for its (name, viewport) key,
-and set its status to `pass`.
+and set its status to `pass`. If the run is scoped (branch or release), the baseline is written
+into that scope only — see **Baseline scoping** above — never to master.
 `200` → `{"name", "status": "pass"}`
 `409` → no candidate PNG exists yet (not rendered). `404` unknown run or name.
 
@@ -180,6 +199,25 @@ to every future run of that same test case, not just this one. Body: same shape 
 ### `DELETE /api/runs/<run_id>/snapshots/<name>/masks/<mask_id>`
 Delete a per-image mask scoped to this snapshot's (name, viewport) key.
 `204` on success · `404` unknown run or name, or `mask_id` not found for this (name, viewport) key.
+
+## Branches & Releases
+
+See **Baseline scoping** under Concepts. There is deliberately no endpoint to list or delete
+branches in this version — a branch is just whatever `id` string a run's `scope` names, and an
+unused or typo'd branch id simply never accumulates any files. This is a known, accepted
+limitation for now, not an oversight.
+
+### `POST /api/branches/<branch_id>/merge`
+Promote every baseline the branch has approved to master (unconditional — no conflict detection
+against concurrent master changes; the promoted-over master baseline is preserved in master's
+history, same as a normal approve). A branch with nothing approved yet is not an error.
+`200` → `{"merged": ["<content-hash>", ...], "count": <int>}`
+`400` → invalid `branch_id`.
+
+### `POST /api/releases`
+Cut a new release. Body: `{"id": "<string>"}` (same `id` rules as a run's `scope.id`).
+`201` → `{"id", "createdAt": "<ISO 8601 UTC>", "seededFrom": "master"|"<prior-release-id>", "fileCount": <int>}`
+`400` → invalid `id`. `409` → a release with that `id` already exists.
 
 ## Errors
 
