@@ -22,6 +22,7 @@ def create_app(data_dir: str | os.PathLike | None = None) -> Flask:
         if allowed_origin_env is None
         else {origin.strip() for origin in allowed_origin_env.split(",") if origin.strip()}
     )
+    app.config["API_TOKEN"] = os.environ.get("PPS_API_TOKEN")
 
     db.init_app(app)
     app.register_blueprint(api.bp)
