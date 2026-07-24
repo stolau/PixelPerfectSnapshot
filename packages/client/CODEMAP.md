@@ -1,6 +1,6 @@
 # packages/client — CODEMAP
 
-npm library (`@stolau/pixelperfectsnapshot`) installed into target projects to capture DOM snapshots in
+npm library (`pixelperfectsnapshot`) installed into target projects to capture DOM snapshots in
 e2e tests and upload them to the backend.
 
 ## Public surface (`src/index.ts`)
