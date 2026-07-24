@@ -119,3 +119,48 @@ test("throws a clear error when neither opts.serverUrl nor PPS_SERVER_URL is set
   expect(err!.message).toContain("serverUrl");
   expect(err!.message).toContain("PPS_SERVER_URL");
 });
+
+test("sends no Authorization header when neither opts.token nor PPS_API_TOKEN is set", async () => {
+  vi.stubEnv("PPS_API_TOKEN", undefined);
+  const calls: { init: RequestInit }[] = [];
+  vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+    calls.push({ init });
+    return new Response('{"name":"x","status":"pending"}', { status: 201 });
+  });
+
+  await sendSnapshots([snap("a")], OPTS);
+
+  expect(calls[0].init.headers).toEqual({ "Content-Type": "application/json" });
+});
+
+test("an explicit token wins even when PPS_API_TOKEN is also set, merged with Content-Type", async () => {
+  vi.stubEnv("PPS_API_TOKEN", "env-token");
+  const calls: { init: RequestInit }[] = [];
+  vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+    calls.push({ init });
+    return new Response('{"name":"x","status":"pending"}', { status: 201 });
+  });
+
+  await sendSnapshots([snap("a")], { ...OPTS, token: "explicit-token" });
+
+  expect(calls[0].init.headers).toEqual({
+    "Content-Type": "application/json",
+    Authorization: "Bearer explicit-token",
+  });
+});
+
+test("falls back to PPS_API_TOKEN when opts.token is omitted, merged with Content-Type", async () => {
+  vi.stubEnv("PPS_API_TOKEN", "env-token");
+  const calls: { init: RequestInit }[] = [];
+  vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+    calls.push({ init });
+    return new Response('{"name":"x","status":"pending"}', { status: 201 });
+  });
+
+  await sendSnapshots([snap("a")], OPTS);
+
+  expect(calls[0].init.headers).toEqual({
+    "Content-Type": "application/json",
+    Authorization: "Bearer env-token",
+  });
+});

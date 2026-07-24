@@ -22,6 +22,11 @@ e2e tests and upload them to the backend.
 - `serverUrl` on `sendSnapshots`/`processRun`/`createRun` is optional: falls back to
   `process.env.PPS_SERVER_URL` when omitted, throws a clear `Error` if neither is set. An
   explicitly-passed `serverUrl` always wins over the env var.
+- `token` on `sendSnapshots`/`processRun`/`createRun` is optional: falls back to
+  `process.env.PPS_API_TOKEN` when omitted; unlike `serverUrl`, it is fine for both to be unset
+  (no `Authorization` header is sent — valid against a backend with auth off). When resolved, it
+  is sent as `Authorization: Bearer <token>`. An explicitly-passed `token` always wins over the
+  env var.
 - `rehydrate(snapshot, doc?): Promise<void>` — applies snapshot stylesheets, disables
   animations/transitions, and resolves once fonts and images have loaded
   (`docs/SNAPSHOT_FORMAT.md` rehydration steps 2–3); appends the `<style>` at end of `<head>`

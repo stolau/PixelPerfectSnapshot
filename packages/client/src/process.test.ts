@@ -81,3 +81,48 @@ test("throws a clear error when neither opts.serverUrl nor PPS_SERVER_URL is set
   expect(err!.message).toContain("serverUrl");
   expect(err!.message).toContain("PPS_SERVER_URL");
 });
+
+test("sends no Authorization header when neither opts.token nor PPS_API_TOKEN is set", async () => {
+  vi.stubEnv("PPS_API_TOKEN", undefined);
+  const calls: { init: RequestInit }[] = [];
+  vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+    calls.push({ init });
+    return new Response('{"id":"run/1 2","createdAt":"2026-01-01T00:00:00Z","snapshots":[]}', {
+      status: 200,
+    });
+  });
+
+  await processRun(OPTS);
+
+  expect(calls[0].init.headers).toBeUndefined();
+});
+
+test("an explicit token wins even when PPS_API_TOKEN is also set", async () => {
+  vi.stubEnv("PPS_API_TOKEN", "env-token");
+  const calls: { init: RequestInit }[] = [];
+  vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+    calls.push({ init });
+    return new Response('{"id":"run/1 2","createdAt":"2026-01-01T00:00:00Z","snapshots":[]}', {
+      status: 200,
+    });
+  });
+
+  await processRun({ ...OPTS, token: "explicit-token" });
+
+  expect(calls[0].init.headers).toEqual({ Authorization: "Bearer explicit-token" });
+});
+
+test("falls back to PPS_API_TOKEN when opts.token is omitted", async () => {
+  vi.stubEnv("PPS_API_TOKEN", "env-token");
+  const calls: { init: RequestInit }[] = [];
+  vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+    calls.push({ init });
+    return new Response('{"id":"run/1 2","createdAt":"2026-01-01T00:00:00Z","snapshots":[]}', {
+      status: 200,
+    });
+  });
+
+  await processRun(OPTS);
+
+  expect(calls[0].init.headers).toEqual({ Authorization: "Bearer env-token" });
+});
