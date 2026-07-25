@@ -45,6 +45,19 @@ const alertError =
   "rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/50 dark:text-red-400";
 const mutedCenter = "py-10 text-center text-sm text-slate-500 dark:text-slate-400";
 
+const RUN_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+  timeZone: "UTC",
+});
+
+function formatRunDate(iso: string): string {
+  return RUN_DATE_FORMATTER.format(new Date(iso));
+}
+
 function statusStyles(status: string): { dot: string; pill: string } {
   switch (status) {
     case "pass":
@@ -198,16 +211,35 @@ function RunList({ onSelectRun }: { onSelectRun: (runId: string) => void }) {
 
   return (
     <ul className="flex flex-col gap-2">
-      {runs.map((run) => (
-        <li key={run.id}>
-          <button
-            onClick={() => onSelectRun(run.id)}
-            className={`w-full ${card} px-4 py-3 text-left text-sm text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:shadow dark:text-slate-200 dark:hover:border-slate-700`}
-          >
-            {run.createdAt} — {run.snapshotCount} snapshots
-          </button>
-        </li>
-      ))}
+      {runs.map((run, index) => {
+        const buildNumber = runs.length - index; // list is newest-first; oldest run is #1
+        const { pill } = statusStyles(run.status);
+        return (
+          <li key={run.id}>
+            <button
+              onClick={() => onSelectRun(run.id)}
+              className={`flex w-full items-center gap-3 ${card} px-4 py-3 text-left text-sm text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:shadow dark:text-slate-200 dark:hover:border-slate-700`}
+            >
+              <span
+                data-testid={`run-status-pill-${run.id}`}
+                className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${pill}`}
+              >
+                {run.status}
+              </span>
+              <span className="flex-1">
+                Run #{buildNumber} — {formatRunDate(run.createdAt)} — {run.snapshotCount} snapshots
+              </span>
+              {(run.newCount > 0 || run.removedCount > 0) && (
+                <span className="shrink-0 text-xs text-slate-400 dark:text-slate-500">
+                  {run.newCount > 0 ? `+${run.newCount} new` : null}
+                  {run.newCount > 0 && run.removedCount > 0 ? ", " : null}
+                  {run.removedCount > 0 ? `-${run.removedCount} missing` : null}
+                </span>
+              )}
+            </button>
+          </li>
+        );
+      })}
     </ul>
   );
 }

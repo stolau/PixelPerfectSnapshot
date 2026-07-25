@@ -23,7 +23,13 @@ approved baselines. HTTP contract: `docs/API.md`. Upload payload contract:
   "<string>"}}`; omitted `scope` = unscoped, unchanged; `kind` must be exactly `branch` or
   `release` else 400; `id` validated via `_validate_scope_id()` else 400; `kind: "release"` must
   name an existing row in `releases` else 404 "release not found"; `scope_kind`/`scope_id` are
-  stored on the run but never appear in the response body), `GET /api/runs`,
+  stored on the run but never appear in the response body),
+  `GET /api/runs` (each row also carries `status` — aggregate verdict via `_run_verdict()`: `fail`
+  if any snapshot failed, else `pass` if the run has ≥1 snapshot and all passed, else `pending`
+  (covers pending/approved-baseline-missing/zero-snapshot); `newCount` — this run's own snapshots
+  with status `approved-baseline-missing`; `removedCount` — master `approved_baselines` keys not
+  covered by this run's own snapshots, always MASTER-only regardless of the run's own scope, and
+  not updated by branch-merge promotions — see `docs/API.md`),
   `GET /api/runs/<run_id>`, `POST /api/runs/<run_id>/snapshots` (schema-validated),
   `GET /api/runs/<run_id>/snapshots/<name>`,
   `GET /api/runs/<run_id>/snapshots/<name>/images/<kind>` (serves the PNGs; baseline resolution is
@@ -35,7 +41,10 @@ approved baselines. HTTP contract: `docs/API.md`. Upload payload contract:
   for this unit),
   `POST /api/runs/<run_id>/snapshots/<name>/approve` (promotes the candidate PNG to the scope-aware
   baseline via `scoped_baseline_write_path()`, preserving the outgoing baseline under the matching
-  `scoped_baseline_history_path()` when one already exists at that write path, status → `pass`; 409
+  `scoped_baseline_history_path()` when one already exists at that write path, status → `pass`; for
+  unscoped (master) runs also upserts `(name, viewport_width, viewport_height)` into
+  `approved_baselines` — NOT done for branch/release-scoped approves, and NOT done by
+  `POST /api/branches/<id>/merge` either (it only has content hashes, not name/viewport); 409
   if no candidate yet),
   `POST /api/branches/<branch_id>/merge` (validates `branch_id` via `_validate_scope_id()`, 400 on
   malformed; copies every `*.png` directly under `baselines/branches/<branch_id>/` onto the
@@ -78,6 +87,10 @@ approved baselines. HTTP contract: `docs/API.md`. Upload payload contract:
 - `app/db.py` — SQLite plumbing (stdlib `sqlite3`): schema, per-request connection via `flask.g`.
   `runs` has nullable `scope_kind`/`scope_id` columns (CHECK: both null or both set; `scope_kind`
   must be `branch` or `release` when set) and a `releases` table for release metadata.
+  `approved_baselines` (`name`, `viewport_width`, `viewport_height` primary key) is a pure
+  existence index of (name, viewport) keys with a current MASTER-scoped approved baseline —
+  upserted by `approve_snapshot`, read by `GET /api/runs`'s `removedCount` computation; has no
+  reverse mapping for branch/release-scoped or merge-promoted baselines.
 - `tests/` — pytest suite (uses the Flask test client; also validates
   `docs/examples/example-snapshot.json` against the schema).
 

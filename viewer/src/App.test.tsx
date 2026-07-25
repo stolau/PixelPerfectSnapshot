@@ -75,7 +75,7 @@ function requests(): { method: string; url: string }[] {
 
 async function openRunDetail() {
   render(<App />);
-  fireEvent.click(await screen.findByRole("button", { name: /2026-07-15T09:30:00Z/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /Jul 15, 09:30/ }));
 }
 
 async function openSnapshotDetail() {
@@ -153,17 +153,63 @@ test("renders the app heading", () => {
   expect(screen.getByRole("heading", { name: "PixelPerfectSnapshot" })).toBeDefined();
 });
 
-test("run list renders runs from GET /api/runs, newest first", async () => {
+test("run list renders runs from GET /api/runs, newest first, with verdict/build number/counts", async () => {
   render(<App />);
 
-  await screen.findByText("2026-07-15T09:30:00Z — 3 snapshots");
-  await screen.findByText("2026-07-14T18:00:00Z — 1 snapshots");
+  await screen.findByText(/Jul 15, 09:30/);
   expect(requests()).toContainEqual({ method: "GET", url: "/api/runs" });
 
   const items = screen.getAllByRole("listitem");
   expect(items.length).toBe(2);
-  expect(items[0].textContent).toContain("2026-07-15T09:30:00Z");
-  expect(items[1].textContent).toContain("2026-07-14T18:00:00Z");
+
+  // Newest first: run-2 is item 0 (build number 2, since it's the more recent of 2 runs).
+  expect(items[0].textContent).toContain("Run #2");
+  expect(items[0].textContent).toContain("Jul 15, 09:30");
+  expect(items[0].textContent).toContain("3 snapshots");
+  expect(items[0].textContent).toContain("fail");
+  expect(items[0].textContent).toContain("+1 new");
+  expect(items[0].textContent).not.toContain("missing");
+
+  // Oldest run is #1.
+  expect(items[1].textContent).toContain("Run #1");
+  expect(items[1].textContent).toContain("Jul 14, 18:00");
+  expect(items[1].textContent).toContain("1 snapshots");
+  expect(items[1].textContent).toContain("pending");
+  expect(items[1].textContent).toContain("-2 missing");
+  expect(items[1].textContent).not.toContain("new");
+});
+
+test("run list shows a color-coded verdict pill per run", async () => {
+  render(<App />);
+  await screen.findByText(/Jul 15, 09:30/);
+
+  const failPill = screen.getByTestId("run-status-pill-run-2");
+  const pendingPill = screen.getByTestId("run-status-pill-run-1");
+  expect(failPill.textContent).toBe("fail");
+  expect(pendingPill.textContent).toBe("pending");
+  expect(failPill.className).not.toBe(pendingPill.className);
+});
+
+test("run list hides the new/removed summary when both counts are zero", async () => {
+  routes["GET /api/runs"] = {
+    body: {
+      runs: [
+        {
+          id: "run-3",
+          createdAt: "2026-07-16T10:00:00Z",
+          snapshotCount: 1,
+          status: "pass",
+          newCount: 0,
+          removedCount: 0,
+        },
+      ],
+    },
+  };
+  render(<App />);
+  await screen.findByText(/Jul 16, 10:00/);
+
+  expect(screen.queryByText(/new/)).toBeNull();
+  expect(screen.queryByText(/missing/)).toBeNull();
 });
 
 test("run list shows an empty-state message when there are no runs", async () => {
@@ -534,7 +580,7 @@ test("saving the auth token via the UI adds an Authorization header to subsequen
   fireEvent.click(screen.getByRole("button", { name: "Save token" }));
   fireEvent.click(screen.getByRole("button", { name: "PixelPerfectSnapshot" }));
 
-  fireEvent.click(await screen.findByRole("button", { name: /2026-07-15T09:30:00Z/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /Jul 15, 09:30/ }));
   await screen.findByText("checkout-page — 1280x720 — pending");
 
   const call = fetchMock.mock.calls.find((c) => c[0] === `/api/runs/${RUN_ID}`);
@@ -551,7 +597,7 @@ test("clearing the auth token removes the Authorization header from subsequent A
 
   fireEvent.click(screen.getByRole("button", { name: "Clear token" }));
   fireEvent.click(screen.getByRole("button", { name: "PixelPerfectSnapshot" }));
-  fireEvent.click(await screen.findByRole("button", { name: /2026-07-15T09:30:00Z/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /Jul 15, 09:30/ }));
   await screen.findByText("checkout-page — 1280x720 — pending");
 
   const call = fetchMock.mock.calls.find((c) => c[0] === `/api/runs/${RUN_ID}`);

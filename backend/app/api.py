@@ -130,16 +130,54 @@ def create_run() -> tuple[Response, int] | tuple[dict[str, str], int]:
     return {"id": run_id, "createdAt": created_at}, 201
 
 
+def _run_verdict(snapshot_count: int, fail_count: int, pass_count: int) -> str:
+    if fail_count > 0:
+        return "fail"
+    if snapshot_count > 0 and pass_count == snapshot_count:
+        return "pass"
+    return "pending"
+
+
 @bp.get("/runs")
 def list_runs() -> dict[str, list[dict[str, object]]]:
-    rows = get_db().execute(
-        "SELECT runs.id, runs.created_at, COUNT(snapshots.id) AS snapshot_count"
+    db = get_db()
+    rows = db.execute(
+        "SELECT runs.id AS id, runs.created_at AS created_at,"
+        " COUNT(snapshots.id) AS snapshot_count,"
+        " SUM(CASE WHEN snapshots.status = 'fail' THEN 1 ELSE 0 END) AS fail_count,"
+        " SUM(CASE WHEN snapshots.status = 'pass' THEN 1 ELSE 0 END) AS pass_count,"
+        " SUM(CASE WHEN snapshots.status = 'approved-baseline-missing' THEN 1 ELSE 0 END)"
+        "   AS new_count"
         " FROM runs LEFT JOIN snapshots ON snapshots.run_id = runs.id"
         " GROUP BY runs.id ORDER BY runs.rowid DESC"
     ).fetchall()
+    approved_keys = {
+        (r["name"], r["viewport_width"], r["viewport_height"])
+        for r in db.execute(
+            "SELECT name, viewport_width, viewport_height FROM approved_baselines"
+        ).fetchall()
+    }
+    run_keys: dict[str, set[tuple[str, int, int]]] = {}
+    for r in db.execute(
+        "SELECT run_id, name, viewport_width, viewport_height FROM snapshots"
+    ).fetchall():
+        run_keys.setdefault(r["run_id"], set()).add(
+            (r["name"], r["viewport_width"], r["viewport_height"])
+        )
     return {
         "runs": [
-            {"id": row["id"], "createdAt": row["created_at"], "snapshotCount": row["snapshot_count"]}
+            {
+                "id": row["id"],
+                "createdAt": row["created_at"],
+                "snapshotCount": row["snapshot_count"],
+                "status": _run_verdict(row["snapshot_count"], row["fail_count"], row["pass_count"]),
+                "newCount": row["new_count"],
+                # removedCount always diffs against MASTER's approved_baselines, regardless of
+                # this run's own scope (master/branch/release) -- see docs/API.md's removedCount
+                # note. Deliberately not scope-aware: doing so would need a second, symmetric
+                # reverse-index for branch/release baselines, which is out of scope here.
+                "removedCount": len(approved_keys - run_keys.get(row["id"], set())),
+            }
             for row in rows
         ]
     }
@@ -334,6 +372,16 @@ def approve_snapshot(run_id: str, name: str) -> tuple[Response, int] | tuple[dic
         shutil.copyfile(baseline, history_path)
     shutil.copyfile(candidate, baseline)
     db = get_db()
+    if run["scope_kind"] is None:
+        # NOTE: POST /api/branches/<id>/merge promotes baselines to master by content hash
+        # only (it has no (name, viewport) tuple to work with), so it does not update this
+        # index -- GET /api/runs' removedCount can undercount for baselines established via
+        # branch merge. Known, deliberately deferred gap (see docs/API.md).
+        db.execute(
+            "INSERT OR REPLACE INTO approved_baselines (name, viewport_width, viewport_height)"
+            " VALUES (?, ?, ?)",
+            (snapshot["name"], snapshot["viewport_width"], snapshot["viewport_height"]),
+        )
     db.execute("UPDATE snapshots SET status = 'pass' WHERE run_id = ? AND name = ?", (run_id, name))
     db.commit()
     return {"name": name, "status": "pass"}, 200

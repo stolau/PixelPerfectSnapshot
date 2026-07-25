@@ -7,11 +7,18 @@ Consumes the backend HTTP API (`docs/API.md`).
 
 - `index.html` — Vite entry document.
 - `src/main.tsx` — React root bootstrap.
-- `src/App.tsx` — application root: three views with state-based navigation — run list →
-  run detail → snapshot detail (baseline/candidate/diff side by side, approve button; refetches
-  the snapshot after a successful approve so the status stays fresh). An always-visible
-  `AuthTokenInput` (near the `<h1>`) shows the currently stored auth token (if any) in a password
-  field with "Save token" / "Clear token" buttons wired to `setAuthToken()`. Snapshot detail also
+- `src/App.tsx` — application root: a persistent `NavBar` (logo placeholder + app name, click to
+  return to the run list; a "Settings" link, highlighted when active) plus four state-based views
+  — run list → run detail → snapshot detail (baseline/candidate/diff side by side, approve button;
+  refetches the snapshot after a successful approve so the status stays fresh) and a standalone
+  `Settings` view holding `AuthTokenInput` (shows the currently stored auth token, if any, in a
+  password field with "Save token" / "Clear token" buttons wired to `setAuthToken()`). Run list
+  rows show a color-coded verdict pill (`statusStyles()`, shared with the snapshot-status pill —
+  `fail`/`pass`/`pending`, computed server-side by `GET /api/runs`), a client-computed sequential
+  `Run #N` (oldest run is #1, purely a display number, never persisted), a human-readable
+  `formatRunDate()` timestamp (`Intl.DateTimeFormat`, fixed to UTC since `createdAt` is always
+  `Z`-suffixed), and a muted "+N new, -N missing" summary from the API's `newCount`/`removedCount`
+  (hidden when both are zero). Snapshot detail also
   shows a "History" section (thumbnails of prior baselines, newest-first), fetched on mount and
   refetched after a successful approve. Run detail shows a "Process pending" button when any
   snapshot is pending, which POSTs `/process` then refetches the run (same pattern as approve's
@@ -47,6 +54,9 @@ Consumes the backend HTTP API (`docs/API.md`).
   instead of failing silently; a `401` specifically points at the auth token input above.
 - `src/api.ts` — typed client for the backend HTTP API (`docs/API.md`). Prefixes requests with
   `VITE_API_BASE` (empty by default; dev server proxies `/api` to `http://localhost:5000`).
+  `RunSummary` includes `status` (`RunStatus` = `"pass" | "fail" | "pending"`), `newCount`, and
+  `removedCount` alongside `id`/`createdAt`/`snapshotCount` — all computed server-side by
+  `GET /api/runs`.
   Also exports `imageUrl(path)`, which applies the same `VITE_API_BASE` prefix to image srcs, and
   `getSnapshotHistory(id, name)` / `historyImageUrl(id, name, timestamp)` for the history list and
   its per-entry image URLs. Mask CRUD: `Mask` (has `id`) and `MaskRect` (no `id`, the shape
