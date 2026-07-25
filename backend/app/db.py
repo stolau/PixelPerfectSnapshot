@@ -37,6 +37,12 @@ CREATE TABLE IF NOT EXISTS releases (
     id TEXT PRIMARY KEY,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS approved_baselines (
+    name TEXT NOT NULL,
+    viewport_width INTEGER NOT NULL,
+    viewport_height INTEGER NOT NULL,
+    PRIMARY KEY (name, viewport_width, viewport_height)
+);
 """
 
 

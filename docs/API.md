@@ -75,11 +75,25 @@ Upload one snapshot. Body: a snapshot document, validated against
 ```json
 {
   "runs": [
-    {"id": "run-2", "createdAt": "2026-07-15T09:30:00Z", "snapshotCount": 3},
-    {"id": "run-1", "createdAt": "2026-07-14T18:00:00Z", "snapshotCount": 1}
+    {"id": "run-2", "createdAt": "2026-07-15T09:30:00Z", "snapshotCount": 3, "status": "fail", "newCount": 1, "removedCount": 0},
+    {"id": "run-1", "createdAt": "2026-07-14T18:00:00Z", "snapshotCount": 1, "status": "pending", "newCount": 0, "removedCount": 2}
   ]
 }
 ```
+- `status` — this run's aggregate verdict: `"fail"` if any snapshot has status `fail`; else
+  `"pass"` if the run has at least one snapshot and all of them are `pass`; else `"pending"`
+  (covers `pending`, `approved-baseline-missing`, and a run with zero snapshots).
+- `newCount` — this run's own snapshots with status `approved-baseline-missing`.
+- `removedCount` — currently-approved **master** `(name, viewport)` keys not covered by this
+  run's own snapshots. Two caveats:
+  - Baselines promoted to master via `POST /api/branches/<id>/merge` are not tracked (that
+    endpoint only has content hashes, not `(name, viewport)` tuples), so `removedCount` can
+    undercount for projects whose primary master-approval path is branch merges.
+  - `removedCount` always compares against **master**, never the run's own scope — for a branch
+    or release scoped run, a nonzero `removedCount` doesn't mean anything was removed from that
+    run's own comparison target, only that master's approved set doesn't match what this run
+    covered. `newCount`, by contrast, does reflect each run's own effective comparison target
+    (driven by the snapshot's own render-time status). This asymmetry is deliberate.
 
 ### `GET /api/runs/<run_id>`
 `200` (snapshots in upload order) · `404` unknown run:

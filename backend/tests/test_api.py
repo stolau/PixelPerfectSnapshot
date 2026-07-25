@@ -816,3 +816,167 @@ def test_create_release_duplicate_id_409(client):
     response = client.post("/api/releases", json={"id": "v1"})
     assert response.status_code == 409
     assert "error" in response.get_json()
+
+
+def set_snapshot_status(tmp_path, run_id: str, name: str, status: str) -> None:
+    conn = sqlite3.connect(tmp_path / "pps.sqlite3")
+    try:
+        conn.execute(
+            "UPDATE snapshots SET status = ? WHERE run_id = ? AND name = ?",
+            (status, run_id, name),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def approved_baseline_rows(tmp_path) -> list[tuple]:
+    conn = sqlite3.connect(tmp_path / "pps.sqlite3")
+    try:
+        return conn.execute(
+            "SELECT name, viewport_width, viewport_height FROM approved_baselines"
+        ).fetchall()
+    finally:
+        conn.close()
+
+
+def run_by_id(client, run_id: str) -> dict:
+    runs = {r["id"]: r for r in client.get("/api/runs").get_json()["runs"]}
+    return runs[run_id]
+
+
+def test_list_runs_status_fail_wins(client):
+    run_id = create_run(client)
+    example = load_example()
+    upload_snapshot(client, run_id, example)
+    other = dict(example)
+    other["name"] = "second-page"
+    upload_snapshot(client, run_id, other)
+    set_snapshot_status(client.application.config["DATA_DIR"], run_id, example["name"], "fail")
+    set_snapshot_status(client.application.config["DATA_DIR"], run_id, other["name"], "pass")
+
+    assert run_by_id(client, run_id)["status"] == "fail"
+
+
+def test_list_runs_status_all_pass(client):
+    run_id = create_run(client)
+    example = load_example()
+    upload_snapshot(client, run_id, example)
+    set_snapshot_status(client.application.config["DATA_DIR"], run_id, example["name"], "pass")
+
+    assert run_by_id(client, run_id)["status"] == "pass"
+
+
+def test_list_runs_status_pending_bucket(client):
+    run_id = create_run(client)
+    example = load_example()
+    upload_snapshot(client, run_id, example)
+    other = dict(example)
+    other["name"] = "second-page"
+    upload_snapshot(client, run_id, other)
+    set_snapshot_status(
+        client.application.config["DATA_DIR"], run_id, other["name"], "approved-baseline-missing"
+    )
+    # example stays at its default "pending" status.
+
+    assert run_by_id(client, run_id)["status"] == "pending"
+
+
+def test_list_runs_status_zero_snapshots_is_pending(client):
+    run_id = create_run(client)
+
+    assert run_by_id(client, run_id)["status"] == "pending"
+
+
+def test_approve_upserts_approved_baselines_no_duplicate(client, tmp_path):
+    example = load_example()
+
+    run_1 = create_run(client)
+    upload_snapshot(client, run_1, example)
+    write_candidate_bytes(tmp_path, run_1, example["name"], (10, 20, 30))
+    assert client.post(f"/api/runs/{run_1}/snapshots/{example['name']}/approve").status_code == 200
+    assert approved_baseline_rows(tmp_path) == [
+        (example["name"], example["viewport"]["width"], example["viewport"]["height"])
+    ]
+
+    run_2 = create_run(client)
+    upload_snapshot(client, run_2, example)
+    write_candidate_bytes(tmp_path, run_2, example["name"], (40, 50, 60))
+    assert client.post(f"/api/runs/{run_2}/snapshots/{example['name']}/approve").status_code == 200
+
+    assert len(approved_baseline_rows(tmp_path)) == 1
+
+
+def test_branch_scoped_approve_does_not_write_approved_baselines(client, tmp_path):
+    example = load_example()
+    run_id = create_scoped_run(client, "branch", "feature-x")
+    upload_snapshot(client, run_id, example)
+    write_candidate_bytes(tmp_path, run_id, example["name"], (1, 2, 3))
+
+    assert client.post(f"/api/runs/{run_id}/snapshots/{example['name']}/approve").status_code == 200
+    assert approved_baseline_rows(tmp_path) == []
+
+
+def test_list_runs_new_and_removed_counts(client, tmp_path):
+    example = load_example()
+    other = dict(example)
+    other["name"] = "login-page"
+
+    # Run A approves both example and other on master.
+    run_a = create_run(client)
+    upload_snapshot(client, run_a, example)
+    upload_snapshot(client, run_a, other)
+    write_candidate_bytes(tmp_path, run_a, example["name"], (1, 1, 1))
+    write_candidate_bytes(tmp_path, run_a, other["name"], (2, 2, 2))
+    assert client.post(f"/api/runs/{run_a}/snapshots/{example['name']}/approve").status_code == 200
+    assert client.post(f"/api/runs/{run_a}/snapshots/{other['name']}/approve").status_code == 200
+
+    # Run B only re-uploads example (still pending; not approved-baseline-missing).
+    run_b = create_run(client)
+    upload_snapshot(client, run_b, example)
+
+    # Run C uploads a brand-new page with no baseline anywhere.
+    run_c = create_run(client)
+    new_page = dict(example)
+    new_page["name"] = "new-page"
+    upload_snapshot(client, run_c, new_page)
+    set_snapshot_status(
+        client.application.config["DATA_DIR"], run_c, new_page["name"], "approved-baseline-missing"
+    )
+
+    assert run_by_id(client, run_a)["removedCount"] == 0
+    assert run_by_id(client, run_a)["newCount"] == 0
+    assert run_by_id(client, run_b)["removedCount"] == 1  # missing "login-page"
+    assert run_by_id(client, run_b)["newCount"] == 0
+    assert run_by_id(client, run_c)["newCount"] == 1
+    assert run_by_id(client, run_c)["removedCount"] == 2  # neither example nor other covered
+
+
+def test_list_runs_counts_for_scoped_run_compare_against_master_only(client, tmp_path):
+    # MASTER already has one approved baseline.
+    example = load_example()
+    master_run = create_run(client)
+    upload_snapshot(client, master_run, example)
+    write_candidate_bytes(tmp_path, master_run, example["name"], (1, 2, 3))
+    assert (
+        client.post(f"/api/runs/{master_run}/snapshots/{example['name']}/approve").status_code
+        == 200
+    )
+
+    # A branch-scoped run that doesn't cover that key at all, with its own snapshot flagged
+    # approved-baseline-missing (as a real render would set it for a first-time branch key).
+    branch_run = create_scoped_run(client, "branch", "feature-x")
+    other = dict(example)
+    other["name"] = "new-widget"
+    upload_snapshot(client, branch_run, other)
+    set_snapshot_status(
+        client.application.config["DATA_DIR"], branch_run, other["name"], "approved-baseline-missing"
+    )
+
+    branch_row = run_by_id(client, branch_run)
+    # newCount reflects this run's own snapshot statuses (scope-aware at render time).
+    assert branch_row["newCount"] == 1
+    # removedCount is intentionally MASTER-only: the example key is approved on master and not
+    # covered by this branch run's snapshots, even though this run was never itself compared
+    # against master baselines during rendering.
+    assert branch_row["removedCount"] == 1

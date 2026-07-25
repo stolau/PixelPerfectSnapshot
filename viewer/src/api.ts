@@ -1,6 +1,7 @@
 import { authHeaders } from "./authToken.js";
 
 export type SnapshotStatus = "pending" | "pass" | "fail" | "approved-baseline-missing";
+export type RunStatus = "pass" | "fail" | "pending";
 
 export interface Viewport {
   width: number;
@@ -11,6 +12,9 @@ export interface RunSummary {
   id: string;
   createdAt: string;
   snapshotCount: number;
+  status: RunStatus;
+  newCount: number;
+  removedCount: number;
 }
 
 export interface RunDetail {

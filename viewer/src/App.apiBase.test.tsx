@@ -47,7 +47,7 @@ test("with VITE_API_BASE=/backend, API calls and image srcs carry the prefix", a
   vi.stubGlobal("fetch", fetchMock);
 
   render(<App />);
-  fireEvent.click(await screen.findByRole("button", { name: /2026-07-15T09:30:00Z/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /Jul 15, 09:30/ }));
   fireEvent.click(await screen.findByRole("button", { name: /^checkout-page/ }));
 
   await screen.findByText("Status: fail");
