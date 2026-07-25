@@ -32,31 +32,72 @@ type View =
   | { kind: "run"; runId: string }
   | { kind: "snapshot"; runId: string; name: string };
 
+const btnPrimary =
+  "inline-flex items-center justify-center rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white";
+const btnSecondary =
+  "inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800";
+const btnGhost =
+  "inline-flex items-center justify-center rounded-md px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800";
+const card =
+  "rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900";
+const alertError =
+  "rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/50 dark:text-red-400";
+const mutedCenter = "py-10 text-center text-sm text-slate-500 dark:text-slate-400";
+
+function statusStyles(status: string): { dot: string; pill: string } {
+  switch (status) {
+    case "pass":
+      return {
+        dot: "bg-emerald-500",
+        pill: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400",
+      };
+    case "fail":
+      return {
+        dot: "bg-red-500",
+        pill: "bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-400",
+      };
+    case "approved-baseline-missing":
+      return {
+        dot: "bg-amber-500",
+        pill: "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400",
+      };
+    default:
+      return {
+        dot: "bg-slate-400",
+        pill: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
+      };
+  }
+}
+
 export function App() {
   const [view, setView] = useState<View>({ kind: "runs" });
 
   return (
-    <>
-      <h1>PixelPerfectSnapshot</h1>
-      <AuthTokenInput />
-      {view.kind === "runs" && (
-        <RunList onSelectRun={(runId) => setView({ kind: "run", runId })} />
-      )}
-      {view.kind === "run" && (
-        <RunDetail
-          runId={view.runId}
-          onSelectSnapshot={(name) => setView({ kind: "snapshot", runId: view.runId, name })}
-          onBack={() => setView({ kind: "runs" })}
-        />
-      )}
-      {view.kind === "snapshot" && (
-        <SnapshotDetail
-          runId={view.runId}
-          name={view.name}
-          onBack={() => setView({ kind: "run", runId: view.runId })}
-        />
-      )}
-    </>
+    <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-8">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-xl font-semibold tracking-tight">PixelPerfectSnapshot</h1>
+          <AuthTokenInput />
+        </div>
+        {view.kind === "runs" && (
+          <RunList onSelectRun={(runId) => setView({ kind: "run", runId })} />
+        )}
+        {view.kind === "run" && (
+          <RunDetail
+            runId={view.runId}
+            onSelectSnapshot={(name) => setView({ kind: "snapshot", runId: view.runId, name })}
+            onBack={() => setView({ kind: "runs" })}
+          />
+        )}
+        {view.kind === "snapshot" && (
+          <SnapshotDetail
+            runId={view.runId}
+            name={view.name}
+            onBack={() => setView({ kind: "run", runId: view.runId })}
+          />
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -73,17 +114,23 @@ function AuthTokenInput() {
   }
 
   return (
-    <div>
-      <label>
+    <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-sm dark:border-slate-800 dark:bg-slate-900">
+      <label className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
         Auth token:{" "}
         <input
           type="password"
           value={token}
           onChange={(e) => setToken(e.target.value)}
           aria-label="Auth token"
+          className="w-32 rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 focus:border-slate-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
         />
       </label>{" "}
-      <button onClick={save}>Save token</button> <button onClick={clear}>Clear token</button>
+      <button onClick={save} className={btnGhost}>
+        Save token
+      </button>{" "}
+      <button onClick={clear} className={btnGhost}>
+        Clear token
+      </button>
     </div>
   );
 }
@@ -96,15 +143,18 @@ function RunList({ onSelectRun }: { onSelectRun: (runId: string) => void }) {
     listRuns().then(setRuns, (err: Error) => setError(err.message));
   }, []);
 
-  if (error !== null) return <p>Error: {error}</p>;
-  if (runs === null) return <p>Loading…</p>;
-  if (runs.length === 0) return <p>No runs yet.</p>;
+  if (error !== null) return <p className={alertError}>Error: {error}</p>;
+  if (runs === null) return <p className={mutedCenter}>Loading…</p>;
+  if (runs.length === 0) return <p className={mutedCenter}>No runs yet.</p>;
 
   return (
-    <ul>
+    <ul className="flex flex-col gap-2">
       {runs.map((run) => (
         <li key={run.id}>
-          <button onClick={() => onSelectRun(run.id)}>
+          <button
+            onClick={() => onSelectRun(run.id)}
+            className={`w-full ${card} px-4 py-3 text-left text-sm text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:shadow dark:text-slate-200 dark:hover:border-slate-700`}
+          >
             {run.createdAt} — {run.snapshotCount} snapshots
           </button>
         </li>
@@ -152,31 +202,44 @@ function RunDetail({
   const hasPending = run !== null && run.snapshots.some((s) => s.status === "pending");
 
   return (
-    <>
-      <button onClick={onBack}>Back</button>
-      {error !== null && <p>Error: {error}</p>}
-      {error === null && run === null && <p>Loading…</p>}
+    <div className="flex flex-col gap-4">
+      <div>
+        <button onClick={onBack} className={btnGhost}>
+          Back
+        </button>
+      </div>
+      {error !== null && <p className={alertError}>Error: {error}</p>}
+      {error === null && run === null && <p className={mutedCenter}>Loading…</p>}
       {run !== null && (
         <>
           {hasPending && (
-            <button onClick={process} disabled={processing}>
-              Process pending
-            </button>
+            <div>
+              <button onClick={process} disabled={processing} className={btnPrimary}>
+                Process pending
+              </button>
+            </div>
           )}
-          {processError !== null && <p>{processError}</p>}
-          <ul>
-            {run.snapshots.map((snapshot) => (
-              <li key={snapshot.name}>
-                <button onClick={() => onSelectSnapshot(snapshot.name)}>
-                  {snapshot.name} — {snapshot.viewport.width}x{snapshot.viewport.height} —{" "}
-                  {snapshot.status}
-                </button>
-              </li>
-            ))}
+          {processError !== null && <p className={alertError}>{processError}</p>}
+          <ul className="flex flex-col gap-2">
+            {run.snapshots.map((snapshot) => {
+              const { dot } = statusStyles(snapshot.status);
+              return (
+                <li key={snapshot.name}>
+                  <button
+                    onClick={() => onSelectSnapshot(snapshot.name)}
+                    className={`flex w-full items-center gap-3 ${card} px-4 py-3 text-left text-sm text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:shadow dark:text-slate-200 dark:hover:border-slate-700`}
+                  >
+                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${dot}`} />
+                    {snapshot.name} — {snapshot.viewport.width}x{snapshot.viewport.height} —{" "}
+                    {snapshot.status}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </>
       )}
-    </>
+    </div>
   );
 }
 
@@ -213,6 +276,23 @@ function resolveMaskIds(
     }
   }
   return bindings;
+}
+
+function ImagePane({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={`${card} p-3`}>
+      <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        {label}
+      </h2>
+      {children}
+    </div>
+  );
 }
 
 function SnapshotDetail({
@@ -373,30 +453,46 @@ function SnapshotDetail({
     }
   }
 
+  const statusPill = snapshot !== null ? statusStyles(snapshot.status) : null;
+
   return (
-    <>
-      <button onClick={onBack}>Back</button>
-      {error !== null && <p>Error: {error}</p>}
-      {error === null && snapshot === null && <p>Loading…</p>}
-      {snapshot !== null && (
+    <div className="flex flex-col gap-4">
+      <div>
+        <button onClick={onBack} className={btnGhost}>
+          Back
+        </button>
+      </div>
+      {error !== null && <p className={alertError}>Error: {error}</p>}
+      {error === null && snapshot === null && <p className={mutedCenter}>Loading…</p>}
+      {snapshot !== null && statusPill !== null && (
         <>
-          <p>Status: {snapshot.status}</p>
-          <div style={{ display: "flex", gap: "1rem" }}>
-            <div>
-              <h2>baseline</h2>
+          <p
+            className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-sm font-medium ${statusPill.pill}`}
+          >
+            Status: {snapshot.status}
+          </p>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <ImagePane label="baseline">
               {snapshot.baselineUrl !== null ? (
-                <AuthenticatedImage src={imageUrl(snapshot.baselineUrl)} alt="baseline" />
+                <div className="rounded-md bg-slate-100 p-2 dark:bg-slate-800">
+                  <AuthenticatedImage
+                    src={imageUrl(snapshot.baselineUrl)}
+                    alt="baseline"
+                    className="mx-auto h-auto max-w-full rounded"
+                  />
+                </div>
               ) : (
-                "not available"
+                <div className="flex h-32 items-center justify-center text-sm text-slate-400">
+                  not available
+                </div>
               )}
-            </div>
-            <div>
-              <h2>candidate</h2>
+            </ImagePane>
+            <ImagePane label="candidate">
               {snapshot.candidateUrl !== null ? (
                 <div
                   ref={overlayRef}
                   data-testid="mask-overlay"
-                  style={{ position: "relative", display: "inline-block" }}
+                  className="relative inline-block rounded-md bg-slate-100 dark:bg-slate-800"
                   onMouseDown={handleMouseDown}
                   onMouseMove={handleMouseMove}
                   onMouseUp={handleMouseUp}
@@ -404,6 +500,7 @@ function SnapshotDetail({
                   <AuthenticatedImage
                     src={imageUrl(snapshot.candidateUrl)}
                     alt="candidate"
+                    className="mx-auto h-auto max-w-full rounded"
                     onLoad={(e) => {
                       const img = e.currentTarget;
                       setImgNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
@@ -422,13 +519,12 @@ function SnapshotDetail({
                           <div
                             key={i}
                             data-testid="mask-rect"
+                            className="absolute bg-red-500/30"
                             style={{
-                              position: "absolute",
                               left: rect.x * scaleX,
                               top: rect.y * scaleY,
                               width: rect.width * scaleX,
                               height: rect.height * scaleY,
-                              background: "rgba(255,0,0,0.3)",
                             }}
                           >
                             {binding !== null && (
@@ -436,6 +532,7 @@ function SnapshotDetail({
                                 data-testid={`mask-delete-${binding.scope}-${binding.id}`}
                                 aria-label="Delete mask"
                                 onClick={() => deleteMask(binding.scope, binding.id)}
+                                className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-xs font-bold leading-none text-white shadow hover:bg-red-700"
                               >
                                 ×
                               </button>
@@ -446,63 +543,96 @@ function SnapshotDetail({
                     })()}
                   {drawStart !== null && drawCurrent !== null && (
                     <div
+                      className="pointer-events-none absolute border-2 border-dashed border-blue-500"
                       style={{
-                        position: "absolute",
                         left: Math.min(drawStart.x, drawCurrent.x),
                         top: Math.min(drawStart.y, drawCurrent.y),
                         width: Math.abs(drawCurrent.x - drawStart.x),
                         height: Math.abs(drawCurrent.y - drawStart.y),
-                        border: "1px dashed blue",
-                        pointerEvents: "none",
                       }}
                     />
                   )}
                 </div>
               ) : (
-                "not available"
-              )}
-            </div>
-            <div>
-              <h2>diff</h2>
-              {snapshot.diffUrl !== null ? (
-                <AuthenticatedImage src={imageUrl(snapshot.diffUrl)} alt="diff" />
-              ) : (
-                "not available"
-              )}
-            </div>
-          </div>
-          <button onClick={approve}>Approve</button>
-          {approveError !== null && <p>{approveError}</p>}
-          <h2>History</h2>
-          {historyError !== null && <p>Error: {historyError}</p>}
-          {historyError === null && history === null && <p>Loading…</p>}
-          {history !== null && history.length === 0 && <p>No history yet.</p>}
-          {history !== null && history.length > 0 && (
-            <div style={{ display: "flex", gap: "1rem" }}>
-              {history.map((entry) => (
-                <div key={entry.timestamp}>
-                  <AuthenticatedImage
-                    src={historyImageUrl(runId, name, entry.timestamp)}
-                    alt={`history ${entry.timestamp}`}
-                  />
-                  <p>{entry.timestamp}</p>
+                <div className="flex h-32 items-center justify-center text-sm text-slate-400">
+                  not available
                 </div>
-              ))}
-            </div>
-          )}
-          <h2>Masks</h2>
-          {pendingRect !== null && (
-            <div data-testid="mask-scope-picker">
-              <button onClick={() => createMask("global")}>Save as global mask</button>
-              <button onClick={() => createMask("per-image")}>
-                Save as mask for this snapshot
-              </button>
-              <button onClick={() => setPendingRect(null)}>Cancel</button>
-            </div>
-          )}
-          {masksError !== null && <p>{masksError}</p>}
+              )}
+            </ImagePane>
+            <ImagePane label="diff">
+              {snapshot.diffUrl !== null ? (
+                <div className="rounded-md bg-slate-100 p-2 dark:bg-slate-800">
+                  <AuthenticatedImage
+                    src={imageUrl(snapshot.diffUrl)}
+                    alt="diff"
+                    className="mx-auto h-auto max-w-full rounded"
+                  />
+                </div>
+              ) : (
+                <div className="flex h-32 items-center justify-center text-sm text-slate-400">
+                  not available
+                </div>
+              )}
+            </ImagePane>
+          </div>
+          <div>
+            <button onClick={approve} className={btnPrimary}>
+              Approve
+            </button>
+          </div>
+          {approveError !== null && <p className={alertError}>{approveError}</p>}
+
+          <section className="flex flex-col gap-2">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              History
+            </h2>
+            {historyError !== null && <p className={alertError}>Error: {historyError}</p>}
+            {historyError === null && history === null && <p className={mutedCenter}>Loading…</p>}
+            {history !== null && history.length === 0 && (
+              <p className="text-sm text-slate-500 dark:text-slate-400">No history yet.</p>
+            )}
+            {history !== null && history.length > 0 && (
+              <div className="flex flex-wrap gap-4">
+                {history.map((entry) => (
+                  <div key={entry.timestamp} className={`${card} p-2`}>
+                    <AuthenticatedImage
+                      src={historyImageUrl(runId, name, entry.timestamp)}
+                      alt={`history ${entry.timestamp}`}
+                      className="h-auto max-w-40 rounded"
+                    />
+                    <p className="mt-1 text-center text-xs text-slate-500 dark:text-slate-400">
+                      {entry.timestamp}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="flex flex-col gap-2">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Masks
+            </h2>
+            {pendingRect !== null && (
+              <div
+                data-testid="mask-scope-picker"
+                className={`flex w-fit items-center gap-2 ${card} px-3 py-2`}
+              >
+                <button onClick={() => createMask("global")} className={btnSecondary}>
+                  Save as global mask
+                </button>
+                <button onClick={() => createMask("per-image")} className={btnSecondary}>
+                  Save as mask for this snapshot
+                </button>
+                <button onClick={() => setPendingRect(null)} className={btnGhost}>
+                  Cancel
+                </button>
+              </div>
+            )}
+            {masksError !== null && <p className={alertError}>{masksError}</p>}
+          </section>
         </>
       )}
-    </>
+    </div>
   );
 }
