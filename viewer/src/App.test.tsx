@@ -235,7 +235,11 @@ test("snapshot detail with null URLs shows three placeholders and no images", as
   await screen.findByText("Status: pending");
   expect(requests()).toContainEqual({ method: "GET", url: SNAPSHOT_URL });
   expect(screen.getAllByText("not available").length).toBe(3);
-  expect(document.querySelectorAll("img").length).toBe(0);
+  // Not a blanket "no <img> anywhere" check -- the persistent nav-bar logo is legitimately
+  // always present. Scoped to the snapshot images this test actually cares about.
+  expect(screen.queryByAltText("baseline")).toBeNull();
+  expect(screen.queryByAltText("candidate")).toBeNull();
+  expect(screen.queryByAltText("diff")).toBeNull();
 });
 
 test("snapshot detail with rendered URLs shows baseline, candidate, and diff images", async () => {

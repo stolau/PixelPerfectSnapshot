@@ -122,10 +122,7 @@ function NavBar({ view, onNavigate }: { view: View; onNavigate: (view: View) => 
           aria-label="PixelPerfectSnapshot"
           className="flex items-center gap-2 rounded-md text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
         >
-          {/* Logo placeholder -- swap for <img src="/logo.svg" className="h-8 w-8" alt="" /> once available. */}
-          <span className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-900 text-sm font-bold text-white dark:bg-slate-100 dark:text-slate-900">
-            P
-          </span>
+          <img src="/mark.svg" alt="" className="h-8 w-8 rounded-md" />
           <h1 className="text-lg font-semibold tracking-tight">PixelPerfectSnapshot</h1>
         </button>
         <button
