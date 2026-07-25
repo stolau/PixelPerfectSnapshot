@@ -30,7 +30,8 @@ import { getAuthToken, setAuthToken } from "./authToken.js";
 type View =
   | { kind: "runs" }
   | { kind: "run"; runId: string }
-  | { kind: "snapshot"; runId: string; name: string };
+  | { kind: "snapshot"; runId: string; name: string }
+  | { kind: "settings" };
 
 const btnPrimary =
   "inline-flex items-center justify-center rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white";
@@ -74,11 +75,8 @@ export function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      <NavBar view={view} onNavigate={setView} />
       <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-8">
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-xl font-semibold tracking-tight">PixelPerfectSnapshot</h1>
-          <AuthTokenInput />
-        </div>
         {view.kind === "runs" && (
           <RunList onSelectRun={(runId) => setView({ kind: "run", runId })} />
         )}
@@ -96,7 +94,56 @@ export function App() {
             onBack={() => setView({ kind: "run", runId: view.runId })}
           />
         )}
+        {view.kind === "settings" && <SettingsView />}
       </div>
+    </div>
+  );
+}
+
+function NavBar({ view, onNavigate }: { view: View; onNavigate: (view: View) => void }) {
+  return (
+    <nav className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+      <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
+        <button
+          onClick={() => onNavigate({ kind: "runs" })}
+          aria-label="PixelPerfectSnapshot"
+          className="flex items-center gap-2 rounded-md text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+        >
+          {/* Logo placeholder -- swap for <img src="/logo.svg" className="h-8 w-8" alt="" /> once available. */}
+          <span className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-900 text-sm font-bold text-white dark:bg-slate-100 dark:text-slate-900">
+            P
+          </span>
+          <h1 className="text-lg font-semibold tracking-tight">PixelPerfectSnapshot</h1>
+        </button>
+        <button
+          onClick={() => onNavigate({ kind: "settings" })}
+          className={
+            view.kind === "settings"
+              ? "rounded-md bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-900 dark:bg-slate-800 dark:text-slate-100"
+              : btnGhost
+          }
+        >
+          Settings
+        </button>
+      </div>
+    </nav>
+  );
+}
+
+function SettingsView() {
+  return (
+    <div className="flex flex-col gap-4">
+      <h2 className="text-lg font-semibold tracking-tight">Settings</h2>
+      <section className={`${card} flex flex-col gap-3 p-4`}>
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          Authentication
+        </h3>
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          If the backend has <code>PPS_API_TOKEN</code> set, paste it here so requests from this
+          browser are authenticated.
+        </p>
+        <AuthTokenInput />
+      </section>
     </div>
   );
 }
@@ -114,23 +161,25 @@ function AuthTokenInput() {
   }
 
   return (
-    <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-sm dark:border-slate-800 dark:bg-slate-900">
-      <label className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
-        Auth token:{" "}
+    <div className="flex flex-col gap-2">
+      <label className="flex flex-col gap-1 text-sm text-slate-600 dark:text-slate-300">
+        Auth token
         <input
           type="password"
           value={token}
           onChange={(e) => setToken(e.target.value)}
           aria-label="Auth token"
-          className="w-32 rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 focus:border-slate-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+          className="w-full max-w-sm rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 focus:border-slate-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
         />
-      </label>{" "}
-      <button onClick={save} className={btnGhost}>
-        Save token
-      </button>{" "}
-      <button onClick={clear} className={btnGhost}>
-        Clear token
-      </button>
+      </label>
+      <div className="flex gap-2">
+        <button onClick={save} className={btnSecondary}>
+          Save token
+        </button>
+        <button onClick={clear} className={btnGhost}>
+          Clear token
+        </button>
+      </div>
     </div>
   );
 }

@@ -529,8 +529,10 @@ test("create mask failure surfaces the ApiError message and clears the pending r
 
 test("saving the auth token via the UI adds an Authorization header to subsequent API calls", async () => {
   render(<App />);
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   fireEvent.change(screen.getByLabelText("Auth token"), { target: { value: "secret-token" } });
   fireEvent.click(screen.getByRole("button", { name: "Save token" }));
+  fireEvent.click(screen.getByRole("button", { name: "PixelPerfectSnapshot" }));
 
   fireEvent.click(await screen.findByRole("button", { name: /2026-07-15T09:30:00Z/ }));
   await screen.findByText("checkout-page — 1280x720 — pending");
@@ -544,9 +546,11 @@ test("saving the auth token via the UI adds an Authorization header to subsequen
 test("clearing the auth token removes the Authorization header from subsequent API calls", async () => {
   setAuthToken("stale-token");
   render(<App />);
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   expect(screen.getByLabelText("Auth token")).toHaveProperty("value", "stale-token");
 
   fireEvent.click(screen.getByRole("button", { name: "Clear token" }));
+  fireEvent.click(screen.getByRole("button", { name: "PixelPerfectSnapshot" }));
   fireEvent.click(await screen.findByRole("button", { name: /2026-07-15T09:30:00Z/ }));
   await screen.findByText("checkout-page — 1280x720 — pending");
 
