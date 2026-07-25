@@ -570,7 +570,7 @@ function SnapshotDetail({
                 <div
                   ref={overlayRef}
                   data-testid="mask-overlay"
-                  className="relative inline-block rounded-md bg-slate-100 dark:bg-slate-800"
+                  className="relative inline-block select-none rounded-md bg-slate-100 dark:bg-slate-800"
                   onMouseDown={handleMouseDown}
                   onMouseMove={handleMouseMove}
                   onMouseUp={handleMouseUp}
@@ -578,6 +578,7 @@ function SnapshotDetail({
                   <AuthenticatedImage
                     src={imageUrl(snapshot.candidateUrl)}
                     alt="candidate"
+                    draggable={false}
                     className="mx-auto h-auto max-w-full rounded"
                     onLoad={(e) => {
                       const img = e.currentTarget;
@@ -597,7 +598,7 @@ function SnapshotDetail({
                           <div
                             key={i}
                             data-testid="mask-rect"
-                            className="absolute bg-red-500/30"
+                            className="absolute box-border border-2 border-red-500 bg-red-500/30"
                             style={{
                               left: rect.x * scaleX,
                               top: rect.y * scaleY,

@@ -407,6 +407,28 @@ test("mask overlay renders existing masks; only id-known masks get a delete butt
   expect(screen.getAllByRole("button", { name: "Delete mask" }).length).toBe(1);
 });
 
+test("candidate image is not natively draggable, so drawing a mask doesn't drag/select instead", async () => {
+  routes[`GET ${SNAPSHOT_URL}`] = { body: snapshotDetailRenderedFixture };
+  await openSnapshotDetail();
+
+  const img = await screen.findByAltText("candidate");
+  expect(img.getAttribute("draggable")).toBe("false");
+});
+
+test("a saved mask rect has a visible border, not just a delete button", async () => {
+  routes[`GET ${SNAPSHOT_URL}`] = { body: snapshotDetailRenderedFixture };
+  routes[`GET ${SNAPSHOT_URL}/masks`] = {
+    body: { masks: [{ x: 10, y: 20, width: 30, height: 40 }] },
+  };
+  await openSnapshotDetail();
+
+  const img = await screen.findByAltText("candidate");
+  fireEvent.load(img);
+
+  const rect = await screen.findByTestId("mask-rect");
+  expect(rect.className).toMatch(/\bborder-red-500\b/);
+});
+
 test("duplicate rects each resolve to a distinct global mask id, not a double binding", async () => {
   routes[`GET ${SNAPSHOT_URL}`] = { body: snapshotDetailRenderedFixture };
   const rect = { x: 5, y: 5, width: 10, height: 10 };
