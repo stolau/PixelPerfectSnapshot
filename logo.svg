@@ -1,0 +1,19 @@
+<svg width="560" height="160" viewBox="0 0 560 160" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>PixelPerfectSnapshot logo</title>
+<desc>Viewfinder brackets containing a pixel checkmark, with the PixelPerfectSnapshot wordmark and tagline.</desc>
+<rect x="40" y="60" width="10" height="10" fill="#EEF2F7"/>
+<rect x="60" y="50" width="10" height="10" fill="#EEF2F7"/>
+<rect x="80" y="50" width="10" height="10" fill="#EEF2F7"/>
+<rect x="30" y="80" width="10" height="10" fill="#14B8A6"/>
+<rect x="40" y="90" width="10" height="10" fill="#12A3B4"/>
+<rect x="50" y="100" width="10" height="10" fill="#1090C4"/>
+<rect x="60" y="90" width="10" height="10" fill="#2E7BD9"/>
+<rect x="70" y="80" width="10" height="10" fill="#4462E2"/>
+<rect x="80" y="70" width="10" height="10" fill="#4F46E5"/>
+<path d="M20 58 L20 40 L38 40" fill="none" stroke="#0F172A" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M82 40 L100 40 L100 58" fill="none" stroke="#0F172A" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M100 102 L100 120 L82 120" fill="none" stroke="#0F172A" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M38 120 L20 120 L20 102" fill="none" stroke="#0F172A" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="130" y="88" font-family="'Segoe UI', system-ui, -apple-system, sans-serif" font-size="30" font-weight="500" fill="#0F172A">PixelPerfect<tspan fill="#4F46E5">Snapshot</tspan></text>
+<text x="132" y="116" font-family="'Segoe UI', system-ui, -apple-system, sans-serif" font-size="12" fill="#64748B">catch every pixel before your users do</text>
+</svg>

@@ -1,4 +1,4 @@
-# PixelPerfectSnapshot
+![PixelPerfectSnapshot](logo.svg)
 
 CI-runnable visual snapshot testing: capture DOM snapshots in your e2e tests, re-render and
 pixel-diff them against human-approved baselines on a server, review and approve in a web viewer.
