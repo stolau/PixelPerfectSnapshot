@@ -44,6 +44,8 @@ let siteUrl = "";
 let serverUrl = "";
 let flaskBin = "flask";
 let flaskEnv: NodeJS.ProcessEnv = process.env;
+// Assigned by the viewer test; later tests that drive the real viewer UI reuse it.
+let viewerUrl = "";
 
 async function getSnapshotDetail(runId: string) {
   const res = await fetch(`${serverUrl}/api/runs/${runId}/snapshots/demo-page`);
@@ -90,6 +92,7 @@ function freePort(): Promise<number> {
 async function capturePage(
   baseUrl: string,
   viewport = { width: WIDTH, height: HEIGHT },
+  name = "demo-page",
 ): Promise<Snapshot> {
   if (!browser) throw new Error("browser not launched");
   const context = await browser.newContext({ viewport });
@@ -104,7 +107,7 @@ async function capturePage(
     await Promise.all(Array.from(document.images).map((img) => img.decode().catch(() => {})));
   });
   await page.addScriptTag({ path: captureBundle });
-  const snapshot = await page.evaluate((name) => window.__ppsCapture(document, name), "demo-page");
+  const snapshot = await page.evaluate((n) => window.__ppsCapture(document, n), name);
   await context.close();
   return snapshot;
 }
@@ -255,19 +258,30 @@ test(
     const vsrv = createServer((req, res) => {
       const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
       if (pathname.startsWith("/backend/")) {
-        // Forward to flask with the prefix stripped. The only POST (approve) has no body.
-        fetch(`${serverUrl}${pathname.slice("/backend".length)}`, { method: req.method }).then(
-          async (upstream) => {
-            res.writeHead(upstream.status, {
-              "Content-Type": upstream.headers.get("content-type") ?? "application/octet-stream",
-            });
-            res.end(Buffer.from(await upstream.arrayBuffer()));
-          },
-          () => {
-            res.writeHead(502);
-            res.end();
-          },
-        );
+        // Forward to flask with the prefix stripped, including the request body/Content-Type --
+        // needed once a test drives a bodied write (mask creation, category rename) through the
+        // real viewer, not just the bodyless approve POST the original test here used.
+        const chunks: Buffer[] = [];
+        req.on("data", (chunk: Buffer) => chunks.push(chunk));
+        req.on("end", () => {
+          const contentType = req.headers["content-type"];
+          fetch(`${serverUrl}${pathname.slice("/backend".length)}`, {
+            method: req.method,
+            headers: contentType ? { "Content-Type": contentType } : undefined,
+            body: chunks.length > 0 ? Buffer.concat(chunks) : undefined,
+          }).then(
+            async (upstream) => {
+              res.writeHead(upstream.status, {
+                "Content-Type": upstream.headers.get("content-type") ?? "application/octet-stream",
+              });
+              res.end(Buffer.from(await upstream.arrayBuffer()));
+            },
+            () => {
+              res.writeHead(502);
+              res.end();
+            },
+          );
+        });
         return;
       }
       const filePath = pathname === "/" ? "/index.html" : pathname;
@@ -286,7 +300,7 @@ test(
     });
     viewerServer = vsrv;
     await new Promise<void>((resolve) => vsrv.listen(0, "127.0.0.1", resolve));
-    const viewerUrl = `http://127.0.0.1:${(vsrv.address() as AddressInfo).port}`;
+    viewerUrl = `http://127.0.0.1:${(vsrv.address() as AddressInfo).port}`;
 
     // 3. Drive the viewer UI in a browser. Viewport here is for the viewer UI, not snapshots.
     const context = await browser.newContext({ viewport: { width: 1200, height: 700 } });
@@ -345,6 +359,206 @@ test(
     await page.waitForFunction(() => {
       const img = document.querySelector<HTMLImageElement>('img[alt="diff"]');
       return img !== null && img.naturalWidth > 0;
+    });
+
+    await context.close();
+  },
+  240_000,
+);
+
+test(
+  "masks: draw, save as global, and delete a mask against a real rendered image",
+  async () => {
+    if (viewerUrl === "") throw new Error("the viewer test must run (and pass) first");
+
+    const context = await browser!.newContext({ viewport: { width: 1200, height: 700 } });
+    const page = await context.newPage();
+    await page.goto(viewerUrl, { waitUntil: "load" });
+
+    // Same navigation run 2's test already proved reliable: run 3 is the "fail" regression run.
+    const runButtons = page.locator("ul li button");
+    await runButtons.first().waitFor();
+    await runButtons.nth(1).click();
+    const run3Snapshot = page.getByRole("button", { name: "demo-page — 480x360 — fail" });
+    await run3Snapshot.waitFor();
+    await run3Snapshot.click();
+    await page.getByText("Status: fail").waitFor();
+
+    const overlay = page.getByTestId("mask-overlay");
+    await page.waitForFunction(() => {
+      const img = document.querySelector<HTMLImageElement>('img[alt="candidate"]');
+      return img !== null && img.naturalWidth > 0;
+    });
+    const box = await overlay.boundingBox();
+    if (box === null) throw new Error("mask overlay not visible");
+
+    await page.mouse.move(box.x + 20, box.y + 20);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 100, box.y + 80);
+    await page.mouse.up();
+
+    await page.getByTestId("mask-scope-picker").waitFor();
+    await page.getByRole("button", { name: "Save as global mask" }).click();
+    await page.getByTestId("mask-scope-picker").waitFor({ state: "detached" });
+
+    const rect = page.getByTestId("mask-rect");
+    await rect.waitFor();
+    expect(await rect.count()).toBe(1);
+
+    await rect.getByRole("button", { name: "Delete mask" }).click();
+    await page.waitForFunction(() => document.querySelector('[data-testid="mask-rect"]') === null);
+    expect(await page.getByTestId("mask-rect").count()).toBe(0);
+
+    await context.close();
+  },
+  240_000,
+);
+
+test(
+  "Branches & Releases: a scoped run's approval is visible through the filtered list",
+  async () => {
+    if (serverUrl === "") throw new Error("the pipeline test must run (and pass) first");
+    if (viewerUrl === "") throw new Error("the viewer test must run (and pass) first");
+
+    // createRun() has no scope support -- go around the client library, same as the backend's
+    // own scoped-run test fixtures do.
+    const branchRunRes = await fetch(`${serverUrl}/api/runs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope: { kind: "branch", id: "e2e-branch" } }),
+    });
+    expect(branchRunRes.status).toBe(201);
+    const branchRunId = (await branchRunRes.json()).id as string;
+    await sendSnapshots([await capturePage(siteUrl, undefined, "branch-demo-page")], {
+      serverUrl,
+      runId: branchRunId,
+    });
+    await processRun({ serverUrl, runId: branchRunId });
+    const approveRes = await fetch(
+      `${serverUrl}/api/runs/${branchRunId}/snapshots/branch-demo-page/approve`,
+      { method: "POST" },
+    );
+    expect(approveRes.status).toBe(200);
+
+    const context = await browser!.newContext({ viewport: { width: 1200, height: 700 } });
+    const page = await context.newPage();
+    await page.goto(viewerUrl, { waitUntil: "load" });
+
+    await page.getByRole("button", { name: "Branches & Releases" }).click();
+    await page.getByRole("button", { name: "e2e-branch" }).click();
+    await page.getByRole("heading", { name: "Branch: e2e-branch" }).waitFor();
+
+    const runButtons = page.locator("ul li button");
+    await runButtons.first().waitFor();
+    expect(await runButtons.count()).toBe(1);
+    await runButtons.first().click();
+
+    const branchSnapshot = page.getByRole("button", { name: /^branch-demo-page/ });
+    await branchSnapshot.waitFor();
+    await branchSnapshot.click();
+    await page.getByText("Status: pass").waitFor();
+    await page.waitForFunction(() => {
+      const img = document.querySelector<HTMLImageElement>('img[alt="baseline"]');
+      return img !== null && img.naturalWidth > 0;
+    });
+
+    await context.close();
+  },
+  240_000,
+);
+
+test(
+  "bulk approve: selecting two new snapshots approves both against the live backend",
+  async () => {
+    if (serverUrl === "") throw new Error("the pipeline test must run (and pass) first");
+    if (viewerUrl === "") throw new Error("the viewer test must run (and pass) first");
+
+    const bulkRunId = (await createRun({ serverUrl })).id;
+    await sendSnapshots(
+      [
+        await capturePage(siteUrl, undefined, "bulk-page-a"),
+        await capturePage(siteUrl, undefined, "bulk-page-b"),
+      ],
+      { serverUrl, runId: bulkRunId },
+    );
+    await processRun({ serverUrl, runId: bulkRunId });
+
+    const context = await browser!.newContext({ viewport: { width: 1200, height: 700 } });
+    const page = await context.newPage();
+    await page.goto(viewerUrl, { waitUntil: "load" });
+
+    // Newest run is first in the list.
+    const runButtons = page.locator("ul li button");
+    await runButtons.first().waitFor();
+    await runButtons.first().click();
+
+    await page.getByLabel("Select bulk-page-a").check();
+    await page.getByLabel("Select bulk-page-b").check();
+    await page.getByRole("button", { name: "Approve selected (2)" }).click();
+    await page.getByText("2 approved").waitFor();
+
+    expect(await page.getByText(/^bulk-page-a — .* — pass$/).count()).toBe(1);
+    expect(await page.getByText(/^bulk-page-b — .* — pass$/).count()).toBe(1);
+
+    await context.close();
+  },
+  240_000,
+);
+
+test(
+  "category management: tagging, then renaming, cascades back to the snapshot's own Category field",
+  async () => {
+    if (serverUrl === "") throw new Error("the pipeline test must run (and pass) first");
+    if (viewerUrl === "") throw new Error("the viewer test must run (and pass) first");
+
+    const categoryRunId = (await createRun({ serverUrl })).id;
+    await sendSnapshots([await capturePage(siteUrl, undefined, "category-demo-page")], {
+      serverUrl,
+      runId: categoryRunId,
+    });
+    await processRun({ serverUrl, runId: categoryRunId });
+    await fetch(`${serverUrl}/api/runs/${categoryRunId}/snapshots/category-demo-page/approve`, {
+      method: "POST",
+    });
+
+    const context = await browser!.newContext({ viewport: { width: 1200, height: 700 } });
+    const page = await context.newPage();
+    await page.goto(viewerUrl, { waitUntil: "load" });
+
+    // Newest run is first in the list.
+    const runButtons = page.locator("ul li button");
+    await runButtons.first().waitFor();
+    await runButtons.first().click();
+    const categorySnapshot = page.getByRole("button", { name: /^category-demo-page/ });
+    await categorySnapshot.waitFor();
+    await categorySnapshot.click();
+    await page.getByText("Status: pass").waitFor();
+
+    await page.getByLabel("Category").fill("E2E Category");
+    await page.getByRole("button", { name: "Save category" }).click();
+    await page.waitForFunction(() => {
+      const input = document.querySelector<HTMLInputElement>('input[aria-label="Category"]');
+      return input !== null && input.value === "E2E Category";
+    });
+
+    await page.getByRole("button", { name: "Settings" }).click();
+    await page.getByText("E2E Category — 1 snapshots, 0 masks").waitFor();
+
+    await page.getByRole("button", { name: "Rename" }).click();
+    await page.getByLabel("Rename E2E Category").fill("E2E Category Renamed");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await page.getByText("E2E Category Renamed — 1 snapshots, 0 masks").waitFor();
+
+    // Confirm the rename cascaded to the real snapshot row, not just the category listing.
+    await page.getByRole("button", { name: "PixelPerfectSnapshot" }).click();
+    await runButtons.first().waitFor();
+    await runButtons.first().click();
+    await categorySnapshot.waitFor();
+    await categorySnapshot.click();
+    await page.getByText("Status: pass").waitFor();
+    await page.waitForFunction(() => {
+      const input = document.querySelector<HTMLInputElement>('input[aria-label="Category"]');
+      return input !== null && input.value === "E2E Category Renamed";
     });
 
     await context.close();
