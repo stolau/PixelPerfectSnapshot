@@ -23,7 +23,18 @@ Consumes the backend HTTP API (`docs/API.md`).
   no tag, matching their unlabeled appearance before scope existed at all), and a muted "+N new,
   -N missing" summary from the API's `newCount`/`removedCount` (hidden when both are zero). Run
   detail shows a "Process pending" button when any snapshot is pending, which POSTs `/process`
-  then refetches the run before repainting statuses.
+  then refetches the run before repainting statuses. Each `approved-baseline-missing` row also
+  gets a checkbox (siblings, not nested — the row's navigation button became `flex-1` instead of
+  `w-full` to make room, since a full-width `<button>` has no slot to nest an `<input>` inside;
+  other statuses render no checkbox at all, not a disabled one) feeding a `Set<string>` selection;
+  an "Approve selected (N)" button appears once anything's checked and calls the existing
+  single-snapshot `POST .../approve` **sequentially per selected name** (not concurrently, and not
+  a new batch endpoint — this project's Flask dev server is effectively single-worker, and each
+  approve is independent per-snapshot file I/O with nothing to batch-amortize). Failures don't
+  stop the loop — every selected name is attempted regardless of earlier outcomes, then a summary
+  ("N approved, M failed" plus each failure's message) is shown and the run is refetched, so
+  successfully-approved rows lose their checkbox on the next render (no explicit "remove from
+  selection" bookkeeping needed) while failed ones stay checkable for a retry.
 
   **`ScopesView`** — reached via the NavBar link — mirrors `SettingsView`'s two-card-section
   layout: a "Branches" card (one button per `listBranches()` entry) and a "Releases" card (one

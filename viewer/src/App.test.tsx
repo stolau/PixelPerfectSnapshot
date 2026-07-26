@@ -341,6 +341,82 @@ test("run detail renders each snapshot's name and status", async () => {
   expect(requests()).toContainEqual({ method: "GET", url: `/api/runs/${RUN_ID}` });
 });
 
+test("bulk-approve checkbox only appears on approved-baseline-missing rows", async () => {
+  await openRunDetail();
+  await screen.findByText("checkout-page — 1280x720 — pending");
+
+  expect(screen.getByLabelText("Select landing-page")).toBeDefined();
+  expect(screen.queryByLabelText("Select checkout-page")).toBeNull();
+  expect(screen.queryByLabelText("Select login-page")).toBeNull();
+  expect(screen.queryByRole("button", { name: /Approve selected/ })).toBeNull();
+});
+
+test("selecting an eligible snapshot and approving it POSTs to its approve endpoint, refetches, and reports the result", async () => {
+  routes[`POST /api/runs/${RUN_ID}/snapshots/landing-page/approve`] = {
+    body: { name: "landing-page", status: "pass" },
+  };
+  await openRunDetail();
+  await screen.findByText("checkout-page — 1280x720 — pending");
+
+  fireEvent.click(screen.getByLabelText("Select landing-page"));
+  const approveButton = await screen.findByRole("button", { name: "Approve selected (1)" });
+
+  routes[`GET /api/runs/${RUN_ID}`] = {
+    body: {
+      ...runDetailFixture,
+      snapshots: runDetailFixture.snapshots.map((s) =>
+        s.name === "landing-page" ? { ...s, status: "pass" } : s,
+      ),
+    },
+  };
+  fireEvent.click(approveButton);
+
+  await screen.findByText("1 approved");
+  expect(requests()).toContainEqual({
+    method: "POST",
+    url: `/api/runs/${RUN_ID}/snapshots/landing-page/approve`,
+  });
+  // Selection clears and the row is no longer eligible, so the checkbox and button both go away.
+  expect(screen.queryByLabelText("Select landing-page")).toBeNull();
+  expect(screen.queryByRole("button", { name: /Approve selected/ })).toBeNull();
+});
+
+test("bulk approve continues through a partial failure and reports both outcomes", async () => {
+  const twoEligible = {
+    ...runDetailFixture,
+    snapshots: [
+      ...runDetailFixture.snapshots,
+      { name: "other-page", viewport: { width: 100, height: 100 }, status: "approved-baseline-missing" },
+    ],
+  };
+  routes[`GET /api/runs/${RUN_ID}`] = { body: twoEligible };
+  routes[`POST /api/runs/${RUN_ID}/snapshots/landing-page/approve`] = {
+    status: 409,
+    body: { error: "no candidate image exists yet" },
+  };
+  routes[`POST /api/runs/${RUN_ID}/snapshots/other-page/approve`] = {
+    body: { name: "other-page", status: "pass" },
+  };
+  await openRunDetail();
+  await screen.findByText("checkout-page — 1280x720 — pending");
+
+  fireEvent.click(screen.getByLabelText("Select landing-page"));
+  fireEvent.click(screen.getByLabelText("Select other-page"));
+  fireEvent.click(await screen.findByRole("button", { name: "Approve selected (2)" }));
+
+  await screen.findByText("1 approved, 1 failed");
+  expect(screen.getByText(/landing-page: \(409\)/)).toBeDefined();
+  // Both attempts happened -- one failure did not stop the other from running.
+  expect(requests()).toContainEqual({
+    method: "POST",
+    url: `/api/runs/${RUN_ID}/snapshots/landing-page/approve`,
+  });
+  expect(requests()).toContainEqual({
+    method: "POST",
+    url: `/api/runs/${RUN_ID}/snapshots/other-page/approve`,
+  });
+});
+
 test("snapshot detail with null URLs shows two placeholders (dual view: baseline + candidate) and no images", async () => {
   await openSnapshotDetail();
 
