@@ -41,11 +41,15 @@ function isStylesheetRel(rel: string | null): boolean {
  *
  * `options.blockSelectors` blanks out matching elements (content cleared,
  * size preserved, `src` stripped) before assets are inlined.
+ *
+ * `options.category` tags the snapshot with a mask category (see
+ * docs/API.md's mask-categories section) — masks saved against that category
+ * apply to every snapshot sharing it, regardless of `name`.
  */
 export async function captureSnapshot(
   document: Document,
   name: string,
-  options?: { blockSelectors?: string[] },
+  options?: { blockSelectors?: string[]; category?: string },
 ): Promise<Snapshot> {
   const win = document.defaultView;
   if (!win) throw new Error("captureSnapshot: document is not attached to a window");
@@ -147,6 +151,7 @@ export async function captureSnapshot(
   return {
     formatVersion: 0,
     name,
+    ...(options?.category !== undefined ? { category: options.category } : {}),
     viewport: { width: win.innerWidth, height: win.innerHeight },
     html: doctypeString(document.doctype) + clone.outerHTML,
     stylesheets,

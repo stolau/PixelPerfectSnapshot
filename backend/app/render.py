@@ -114,14 +114,28 @@ def compare(
 
 
 def applicable_masks(
-    db: sqlite3.Connection, name: str, width: int, height: int
+    db: sqlite3.Connection, name: str, width: int, height: int, category: str | None = None
 ) -> list[tuple[int, int, int, int]]:
     rows = db.execute(
         "SELECT x, y, width, height FROM masks"
-        " WHERE name IS NULL OR (name = ? AND viewport_width = ? AND viewport_height = ?)",
-        (name, width, height),
+        " WHERE (name IS NULL AND category IS NULL)"
+        " OR (name = ? AND viewport_width = ? AND viewport_height = ?)"
+        " OR (category IS NOT NULL AND category = ?)",
+        (name, width, height, category),
     ).fetchall()
     return [(row["x"], row["y"], row["width"], row["height"]) for row in rows]
+
+
+def category_viewport(
+    db: sqlite3.Connection, category: str, exclude_snapshot_id: int | None = None
+) -> tuple[int, int] | None:
+    query = "SELECT DISTINCT viewport_width, viewport_height FROM snapshots WHERE category = ?"
+    params: tuple[object, ...] = (category,)
+    if exclude_snapshot_id is not None:
+        query += " AND id != ?"
+        params += (exclude_snapshot_id,)
+    row = db.execute(query + " LIMIT 1", params).fetchone()
+    return (row["viewport_width"], row["viewport_height"]) if row is not None else None
 
 
 def process_pending(run_id: str | None = None) -> list[tuple[str, str, str]]:
@@ -129,6 +143,7 @@ def process_pending(run_id: str | None = None) -> list[tuple[str, str, str]]:
     query = (
         "SELECT snapshots.id AS id, snapshots.run_id AS run_id, snapshots.name AS name,"
         " snapshots.viewport_width AS viewport_width, snapshots.viewport_height AS viewport_height,"
+        " snapshots.category AS category,"
         " runs.scope_kind AS scope_kind, runs.scope_id AS scope_id"
         " FROM snapshots JOIN runs ON runs.id = snapshots.run_id"
         " WHERE snapshots.status = 'pending'"
@@ -176,7 +191,7 @@ def process_pending(run_id: str | None = None) -> list[tuple[str, str, str]]:
                 status = "approved-baseline-missing"
             else:
                 masks = applicable_masks(
-                    db, row["name"], row["viewport_width"], row["viewport_height"]
+                    db, row["name"], row["viewport_width"], row["viewport_height"], row["category"]
                 )
                 within_tolerance = compare(
                     baseline,

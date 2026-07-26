@@ -8,7 +8,7 @@ declare global {
     __ppsCapture: (
       doc: Document,
       name: string,
-      options?: { blockSelectors?: string[] },
+      options?: { blockSelectors?: string[]; category?: string },
     ) => Promise<Snapshot>;
   }
 }

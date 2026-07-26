@@ -118,6 +118,7 @@ def test_render_no_baseline(browser_env, app, client, tmp_path):
         "name": "page",
         "viewport": {"width": 320, "height": 240},
         "status": "approved-baseline-missing",
+        "category": None,
         "baselineUrl": None,
         "candidateUrl": f"/api/runs/{run_id}/snapshots/page/images/candidate",
         "diffUrl": None,
@@ -314,6 +315,19 @@ def insert_mask(
         conn.close()
 
 
+def insert_category_mask(tmp_path, category: str, x: int, y: int, width: int, height: int) -> None:
+    conn = sqlite3.connect(tmp_path / "pps.sqlite3")
+    try:
+        conn.execute(
+            "INSERT INTO masks (name, viewport_width, viewport_height, category, x, y, width, height)"
+            " VALUES (NULL, NULL, NULL, ?, ?, ?, ?, ?)",
+            (category, x, y, width, height),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def test_mask_covers_region_no_fail(browser_env, app, client, tmp_path):
     # Baseline box is 21x20 at (10,10) — deliberately 1px wider than the 20x20 mask,
     # to discriminate correct inclusive-corner rectangle math from an off-by-one bug.
@@ -426,6 +440,46 @@ def test_global_and_per_image_masks_combine(browser_env, app, client, tmp_path):
     assert process(app) == [(run_2, "page", "pass")]
 
 
+def test_category_mask_applies_across_snapshot_names_in_same_category(browser_env, app, client, tmp_path):
+    # A category mask, defined once, must suppress the same-position diff on two
+    # independently-named snapshots that both carry the category — the whole point
+    # of the feature (vs. repeating a per-image mask on each one).
+    run_1 = create_run(client)
+    upload(client, run_1, dict(make_box_snapshot("page-a", "box", 10, 10, 20, 20, "#204060"), category="Example Base"))
+    upload(client, run_1, dict(make_box_snapshot("page-b", "box", 10, 10, 20, 20, "#204060"), category="Example Base"))
+    process(app)
+    assert client.post(f"/api/runs/{run_1}/snapshots/page-a/approve").status_code == 200
+    assert client.post(f"/api/runs/{run_1}/snapshots/page-b/approve").status_code == 200
+
+    insert_category_mask(tmp_path, "Example Base", 10, 10, 20, 20)
+
+    run_2 = create_run(client)
+    upload(client, run_2, dict(make_box_snapshot("page-a", "box", 10, 10, 20, 20, "#d02040"), category="Example Base"))
+    upload(client, run_2, dict(make_box_snapshot("page-b", "box", 10, 10, 20, 20, "#00ff00"), category="Example Base"))
+    results = process(app)
+    assert (run_2, "page-a", "pass") in results
+    assert (run_2, "page-b", "pass") in results
+
+
+def test_category_mask_does_not_apply_outside_category(browser_env, app, client, tmp_path):
+    run_1 = create_run(client)
+    upload(client, run_1, dict(make_box_snapshot("page-c", "box", 10, 10, 20, 20, "#204060"), category="Example Base"))
+    upload(client, run_1, make_box_snapshot("page-d", "box", 10, 10, 20, 20, "#204060"))  # no category
+    process(app)
+    assert client.post(f"/api/runs/{run_1}/snapshots/page-c/approve").status_code == 200
+    assert client.post(f"/api/runs/{run_1}/snapshots/page-d/approve").status_code == 200
+
+    insert_category_mask(tmp_path, "Example Base", 10, 10, 20, 20)
+
+    run_2 = create_run(client)
+    upload(client, run_2, dict(make_box_snapshot("page-c", "box", 10, 10, 20, 20, "#d02040"), category="Example Base"))
+    upload(client, run_2, make_box_snapshot("page-d", "box", 10, 10, 20, 20, "#d02040"))  # not in category
+
+    results = process(app)
+    assert (run_2, "page-c", "pass") in results
+    assert (run_2, "page-d", "fail") in results
+
+
 def test_http_created_global_mask_suppresses_diff(browser_env, app, client, tmp_path):
     # The box is 20x20 = 400 differing pixels on a 320x240 (76800px) viewport,
     # i.e. a 0.0052 ratio that exceeds the 0.001 max_diff_ratio — so without the
@@ -453,6 +507,20 @@ def test_masks_check_constraint_rejects_malformed_row(app, tmp_path):
                 "INSERT INTO masks (name, viewport_width, viewport_height, x, y, width, height)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?)",
                 ("page", None, 240, 0, 0, 10, 10),
+            )
+    finally:
+        conn.close()
+
+
+def test_masks_check_constraint_rejects_name_and_category_both_set(app, tmp_path):
+    conn = sqlite3.connect(tmp_path / "pps.sqlite3")
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO masks"
+                " (name, viewport_width, viewport_height, category, x, y, width, height)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                ("page", 320, 240, "Example Base", 0, 0, 10, 10),
             )
     finally:
         conn.close()

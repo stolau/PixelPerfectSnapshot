@@ -1,6 +1,7 @@
 import { authHeaders } from "./authToken.js";
 
 export type SnapshotStatus = "pending" | "pass" | "fail" | "approved-baseline-missing";
+export type RunStatus = "pass" | "fail" | "pending";
 
 export interface Viewport {
   width: number;
@@ -11,6 +12,9 @@ export interface RunSummary {
   id: string;
   createdAt: string;
   snapshotCount: number;
+  status: RunStatus;
+  newCount: number;
+  removedCount: number;
 }
 
 export interface RunDetail {
@@ -23,6 +27,7 @@ export interface SnapshotDetail {
   name: string;
   viewport: Viewport;
   status: SnapshotStatus;
+  category: string | null;
   baselineUrl: string | null;
   candidateUrl: string | null;
   diffUrl: string | null;
@@ -78,6 +83,21 @@ export function getRun(id: string): Promise<RunDetail> {
 export function getSnapshot(id: string, name: string): Promise<SnapshotDetail> {
   return request<SnapshotDetail>(
     `/api/runs/${encodeURIComponent(id)}/snapshots/${encodeURIComponent(name)}`,
+  );
+}
+
+export function updateSnapshotCategory(
+  id: string,
+  name: string,
+  category: string | null,
+): Promise<{ name: string; category: string | null }> {
+  return request<{ name: string; category: string | null }>(
+    `/api/runs/${encodeURIComponent(id)}/snapshots/${encodeURIComponent(name)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ category }),
+    },
   );
 }
 
@@ -178,4 +198,33 @@ export function deleteSnapshotMask(runId: string, name: string, id: number): Pro
     `/api/runs/${encodeURIComponent(runId)}/snapshots/${encodeURIComponent(name)}/masks/${id}`,
     { method: "DELETE" },
   );
+}
+
+export async function listCategories(): Promise<string[]> {
+  const body = await request<{ categories: string[] }>("/api/categories");
+  return body.categories;
+}
+
+export async function listCategoryMasks(category: string): Promise<Mask[]> {
+  const body = await request<{ masks: Mask[] }>(
+    `/api/categories/${encodeURIComponent(category)}/masks`,
+  );
+  return body.masks;
+}
+
+export function createCategoryMask(
+  category: string,
+  rect: { x: number; y: number; width: number; height: number },
+): Promise<Mask> {
+  return request<Mask>(`/api/categories/${encodeURIComponent(category)}/masks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(rect),
+  });
+}
+
+export function deleteCategoryMask(category: string, id: number): Promise<void> {
+  return request<void>(`/api/categories/${encodeURIComponent(category)}/masks/${id}`, {
+    method: "DELETE",
+  });
 }

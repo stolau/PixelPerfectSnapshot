@@ -47,7 +47,7 @@ test("with VITE_API_BASE=/backend, API calls and image srcs carry the prefix", a
   vi.stubGlobal("fetch", fetchMock);
 
   render(<App />);
-  fireEvent.click(await screen.findByRole("button", { name: /2026-07-15T09:30:00Z/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /Jul 15, 09:30/ }));
   fireEvent.click(await screen.findByRole("button", { name: /^checkout-page/ }));
 
   await screen.findByText("Status: fail");
@@ -64,7 +64,6 @@ test("with VITE_API_BASE=/backend, API calls and image srcs carry the prefix", a
   expect(fetchMock.mock.calls.map((c) => c[0])).toContain(
     `/backend${snapshotDetailRenderedFixture.candidateUrl}`,
   );
-  expect(fetchMock.mock.calls.map((c) => c[0])).toContain(
-    `/backend${snapshotDetailRenderedFixture.diffUrl}`,
-  );
+  // Diff isn't fetched by default (dual view shows baseline + candidate only); the prefix
+  // behavior for it is already proven by the candidate/baseline assertions above.
 });

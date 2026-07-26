@@ -83,3 +83,31 @@ test(
   },
   60_000,
 );
+
+test(
+  "captureSnapshot options.category is threaded into the snapshot, and omitted when absent",
+  async () => {
+    if (!existsSync(captureBundle)) {
+      throw new Error(`missing built artifact ${captureBundle} — run \`npm run build\` first`);
+    }
+
+    browser = await chromium.launch();
+    const page = await browser.newPage();
+    await page.setContent(HTML, { waitUntil: "domcontentloaded" });
+    await page.addScriptTag({ path: captureBundle });
+
+    const withCategory: Snapshot = await page.evaluate(
+      ({ name, opts }) => window.__ppsCapture(document, name, opts),
+      { name: "category-test", opts: { category: "Example Base" } },
+    );
+    expect(withCategory.category).toBe("Example Base");
+
+    const withoutCategory: Snapshot = await page.evaluate(
+      ({ name }) => window.__ppsCapture(document, name),
+      { name: "no-category-test" },
+    );
+    expect(withoutCategory.category).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(withoutCategory, "category")).toBe(false);
+  },
+  60_000,
+);

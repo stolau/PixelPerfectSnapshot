@@ -1,6 +1,6 @@
 {
   "runs": [
-    {"id": "run-2", "createdAt": "2026-07-15T09:30:00Z", "snapshotCount": 3},
-    {"id": "run-1", "createdAt": "2026-07-14T18:00:00Z", "snapshotCount": 1}
+    {"id": "run-2", "createdAt": "2026-07-15T09:30:00Z", "snapshotCount": 3, "status": "fail", "newCount": 1, "removedCount": 0},
+    {"id": "run-1", "createdAt": "2026-07-14T18:00:00Z", "snapshotCount": 1, "status": "pending", "newCount": 0, "removedCount": 2}
   ]
 }

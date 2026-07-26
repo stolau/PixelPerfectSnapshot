@@ -314,7 +314,7 @@ test(
       return img !== null && img.naturalWidth > 0;
     });
     expect(await page.locator('img[alt="baseline"]').count()).toBe(0);
-    expect(await page.getByText("not available").count()).toBe(2); // baseline + diff panes
+    expect(await page.getByText("not available").count()).toBe(1); // baseline pane (dual view: baseline + candidate)
 
     // Approve: the UI must reflect the server's post-approve state (pass + real baseline).
     await page.getByRole("button", { name: "Approve" }).click();
@@ -333,12 +333,19 @@ test(
     await run3Snapshot.waitFor();
     await run3Snapshot.click();
     await page.getByText("Status: fail").waitFor();
-    for (const alt of ["baseline", "candidate", "diff"]) {
+    // Dual view default: baseline + candidate side by side, no separate diff pane.
+    for (const alt of ["baseline", "candidate"]) {
       await page.waitForFunction((a) => {
         const img = document.querySelector<HTMLImageElement>(`img[alt="${a}"]`);
         return img !== null && img.naturalWidth > 0;
       }, alt);
     }
+    // "Show diff" swaps the candidate-slot pane to the diff image; must also load through /backend.
+    await page.getByLabel("Show diff").check();
+    await page.waitForFunction(() => {
+      const img = document.querySelector<HTMLImageElement>('img[alt="diff"]');
+      return img !== null && img.naturalWidth > 0;
+    });
 
     await context.close();
   },

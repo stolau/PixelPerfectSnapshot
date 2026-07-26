@@ -16,6 +16,7 @@ from app.render import (
     baseline_history_dir,
     baseline_history_path,
     baseline_history_path_by_hash,
+    category_viewport,
     image_path,
     process_pending,
     scoped_baseline_history_path,
@@ -79,7 +80,7 @@ def _get_run(run_id: str) -> sqlite3.Row | None:
 
 def _get_snapshot(run_id: str, name: str) -> sqlite3.Row | None:
     return get_db().execute(
-        "SELECT id, name, viewport_width, viewport_height, status"
+        "SELECT id, name, viewport_width, viewport_height, status, category"
         " FROM snapshots WHERE run_id = ? AND name = ?",
         (run_id, name),
     ).fetchone()
@@ -130,16 +131,54 @@ def create_run() -> tuple[Response, int] | tuple[dict[str, str], int]:
     return {"id": run_id, "createdAt": created_at}, 201
 
 
+def _run_verdict(snapshot_count: int, fail_count: int, pass_count: int) -> str:
+    if fail_count > 0:
+        return "fail"
+    if snapshot_count > 0 and pass_count == snapshot_count:
+        return "pass"
+    return "pending"
+
+
 @bp.get("/runs")
 def list_runs() -> dict[str, list[dict[str, object]]]:
-    rows = get_db().execute(
-        "SELECT runs.id, runs.created_at, COUNT(snapshots.id) AS snapshot_count"
+    db = get_db()
+    rows = db.execute(
+        "SELECT runs.id AS id, runs.created_at AS created_at,"
+        " COUNT(snapshots.id) AS snapshot_count,"
+        " SUM(CASE WHEN snapshots.status = 'fail' THEN 1 ELSE 0 END) AS fail_count,"
+        " SUM(CASE WHEN snapshots.status = 'pass' THEN 1 ELSE 0 END) AS pass_count,"
+        " SUM(CASE WHEN snapshots.status = 'approved-baseline-missing' THEN 1 ELSE 0 END)"
+        "   AS new_count"
         " FROM runs LEFT JOIN snapshots ON snapshots.run_id = runs.id"
         " GROUP BY runs.id ORDER BY runs.rowid DESC"
     ).fetchall()
+    approved_keys = {
+        (r["name"], r["viewport_width"], r["viewport_height"])
+        for r in db.execute(
+            "SELECT name, viewport_width, viewport_height FROM approved_baselines"
+        ).fetchall()
+    }
+    run_keys: dict[str, set[tuple[str, int, int]]] = {}
+    for r in db.execute(
+        "SELECT run_id, name, viewport_width, viewport_height FROM snapshots"
+    ).fetchall():
+        run_keys.setdefault(r["run_id"], set()).add(
+            (r["name"], r["viewport_width"], r["viewport_height"])
+        )
     return {
         "runs": [
-            {"id": row["id"], "createdAt": row["created_at"], "snapshotCount": row["snapshot_count"]}
+            {
+                "id": row["id"],
+                "createdAt": row["created_at"],
+                "snapshotCount": row["snapshot_count"],
+                "status": _run_verdict(row["snapshot_count"], row["fail_count"], row["pass_count"]),
+                "newCount": row["new_count"],
+                # removedCount always diffs against MASTER's approved_baselines, regardless of
+                # this run's own scope (master/branch/release) -- see docs/API.md's removedCount
+                # note. Deliberately not scope-aware: doing so would need a second, symmetric
+                # reverse-index for branch/release baselines, which is out of scope here.
+                "removedCount": len(approved_keys - run_keys.get(row["id"], set())),
+            }
             for row in rows
         ]
     }
@@ -193,12 +232,29 @@ def upload_snapshot(run_id: str) -> tuple[Response, int] | tuple[dict[str, str],
     schema_error = next(_VALIDATOR.iter_errors(payload), None)
     if schema_error is not None:
         return _error(schema_error.message, 400)
+    category = payload.get("category")
     db = get_db()
+    if category is not None:
+        db.execute("BEGIN IMMEDIATE")
     try:
+        if category is not None:
+            existing = category_viewport(db, category)
+            wanted = (payload["viewport"]["width"], payload["viewport"]["height"])
+            if existing is not None and existing != wanted:
+                db.rollback()
+                return _error(
+                    f"category {category!r} is already used with viewport"
+                    f" {existing[0]}x{existing[1]}",
+                    400,
+                )
         cursor = db.execute(
-            "INSERT INTO snapshots (run_id, name, viewport_width, viewport_height)"
-            " VALUES (?, ?, ?, ?)",
-            (run_id, payload["name"], payload["viewport"]["width"], payload["viewport"]["height"]),
+            "INSERT INTO snapshots (run_id, name, viewport_width, viewport_height, category)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (
+                run_id, payload["name"],
+                payload["viewport"]["width"], payload["viewport"]["height"],
+                category,
+            ),
         )
     except sqlite3.IntegrityError:
         return _error(f"snapshot named {payload['name']!r} already exists in this run", 409)
@@ -254,10 +310,43 @@ def get_snapshot(run_id: str, name: str) -> tuple[Response, int] | dict[str, obj
             "height": snapshot["viewport_height"],
         },
         "status": snapshot["status"],
+        "category": snapshot["category"],
         "baselineUrl": image_url("baseline"),
         "candidateUrl": image_url("candidate"),
         "diffUrl": image_url("diff"),
     }
+
+
+@bp.patch("/runs/<run_id>/snapshots/<name>")
+def update_snapshot_category(run_id: str, name: str) -> tuple[Response, int] | tuple[dict[str, object], int]:
+    if _get_run(run_id) is None:
+        return _error("run not found", 404)
+    snapshot = _get_snapshot(run_id, name)
+    if snapshot is None:
+        return _error("snapshot not found", 404)
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or "category" not in payload:
+        return _error("request body must be a JSON object with a 'category' key", 400)
+    category = payload["category"]
+    if category is not None and (not isinstance(category, str) or not category):
+        return _error("category must be a non-empty string or null", 400)
+    db = get_db()
+    db.execute("BEGIN IMMEDIATE")
+    if category is not None:
+        existing = category_viewport(db, category, exclude_snapshot_id=snapshot["id"])
+        wanted = (snapshot["viewport_width"], snapshot["viewport_height"])
+        if existing is not None and existing != wanted:
+            db.rollback()
+            return _error(
+                f"category {category!r} is already used with viewport {existing[0]}x{existing[1]}",
+                400,
+            )
+    db.execute(
+        "UPDATE snapshots SET category = ? WHERE run_id = ? AND name = ?",
+        (category, run_id, name),
+    )
+    db.commit()
+    return {"name": name, "category": category}, 200
 
 
 @bp.get("/runs/<run_id>/snapshots/<name>/images/<any(baseline,candidate,diff):kind>")
@@ -334,6 +423,16 @@ def approve_snapshot(run_id: str, name: str) -> tuple[Response, int] | tuple[dic
         shutil.copyfile(baseline, history_path)
     shutil.copyfile(candidate, baseline)
     db = get_db()
+    if run["scope_kind"] is None:
+        # NOTE: POST /api/branches/<id>/merge promotes baselines to master by content hash
+        # only (it has no (name, viewport) tuple to work with), so it does not update this
+        # index -- GET /api/runs' removedCount can undercount for baselines established via
+        # branch merge. Known, deliberately deferred gap (see docs/API.md).
+        db.execute(
+            "INSERT OR REPLACE INTO approved_baselines (name, viewport_width, viewport_height)"
+            " VALUES (?, ?, ?)",
+            (snapshot["name"], snapshot["viewport_width"], snapshot["viewport_height"]),
+        )
     db.execute("UPDATE snapshots SET status = 'pass' WHERE run_id = ? AND name = ?", (run_id, name))
     db.commit()
     return {"name": name, "status": "pass"}, 200
@@ -376,7 +475,8 @@ def process_run(run_id: str) -> tuple[Response, int] | dict[str, object]:
 @bp.get("/masks")
 def list_masks() -> dict[str, list[dict[str, int]]]:
     rows = get_db().execute(
-        "SELECT id, x, y, width, height FROM masks WHERE name IS NULL ORDER BY id"
+        "SELECT id, x, y, width, height FROM masks"
+        " WHERE name IS NULL AND category IS NULL ORDER BY id"
     ).fetchall()
     return {
         "masks": [
@@ -411,7 +511,9 @@ def create_mask() -> tuple[Response, int] | tuple[dict[str, int], int]:
 @bp.delete("/masks/<int:mask_id>")
 def delete_mask(mask_id: int) -> tuple[Response, int] | tuple[str, int]:
     db = get_db()
-    cursor = db.execute("DELETE FROM masks WHERE id = ? AND name IS NULL", (mask_id,))
+    cursor = db.execute(
+        "DELETE FROM masks WHERE id = ? AND name IS NULL AND category IS NULL", (mask_id,)
+    )
     db.commit()
     if cursor.rowcount == 0:
         return _error("mask not found", 404)
@@ -426,7 +528,8 @@ def list_snapshot_masks(run_id: str, name: str) -> tuple[Response, int] | dict[s
     if snapshot is None:
         return _error("snapshot not found", 404)
     masks = applicable_masks(
-        get_db(), snapshot["name"], snapshot["viewport_width"], snapshot["viewport_height"]
+        get_db(), snapshot["name"], snapshot["viewport_width"], snapshot["viewport_height"],
+        snapshot["category"],
     )
     return {
         "masks": [
@@ -486,6 +589,67 @@ def delete_snapshot_mask(run_id: str, name: str, mask_id: int) -> tuple[Response
     cursor = db.execute(
         "DELETE FROM masks WHERE id = ? AND name = ? AND viewport_width = ? AND viewport_height = ?",
         (mask_id, snapshot["name"], snapshot["viewport_width"], snapshot["viewport_height"]),
+    )
+    db.commit()
+    if cursor.rowcount == 0:
+        return _error("mask not found", 404)
+    return "", 204
+
+
+@bp.get("/categories")
+def list_categories() -> dict[str, list[str]]:
+    rows = get_db().execute(
+        "SELECT DISTINCT category FROM snapshots WHERE category IS NOT NULL ORDER BY category"
+    ).fetchall()
+    return {"categories": [row["category"] for row in rows]}
+
+
+@bp.get("/categories/<category>/masks")
+def list_category_masks(category: str) -> dict[str, list[dict[str, int]]]:
+    rows = get_db().execute(
+        "SELECT id, x, y, width, height FROM masks WHERE category = ? ORDER BY id", (category,)
+    ).fetchall()
+    return {
+        "masks": [
+            {"id": row["id"], "x": row["x"], "y": row["y"], "width": row["width"], "height": row["height"]}
+            for row in rows
+        ]
+    }
+
+
+@bp.post("/categories/<category>/masks")
+def create_category_mask(category: str) -> tuple[Response, int] | tuple[dict[str, int], int]:
+    viewport = category_viewport(get_db(), category)
+    if viewport is None:
+        return _error(f"category {category!r} is not used by any snapshot", 404)
+    payload = request.get_json(silent=True)
+    validation_error = _validate_mask_payload(payload)
+    if validation_error is not None:
+        return _error(validation_error, 400)
+    width, height = viewport
+    if payload["x"] + payload["width"] > width or payload["y"] + payload["height"] > height:
+        return _error("mask exceeds category viewport bounds", 400)
+    db = get_db()
+    cursor = db.execute(
+        "INSERT INTO masks (name, viewport_width, viewport_height, category, x, y, width, height)"
+        " VALUES (NULL, NULL, NULL, ?, ?, ?, ?, ?)",
+        (category, payload["x"], payload["y"], payload["width"], payload["height"]),
+    )
+    db.commit()
+    return {
+        "id": cursor.lastrowid,
+        "x": payload["x"],
+        "y": payload["y"],
+        "width": payload["width"],
+        "height": payload["height"],
+    }, 201
+
+
+@bp.delete("/categories/<category>/masks/<int:mask_id>")
+def delete_category_mask(category: str, mask_id: int) -> tuple[Response, int] | tuple[str, int]:
+    db = get_db()
+    cursor = db.execute(
+        "DELETE FROM masks WHERE id = ? AND category = ?", (mask_id, category)
     )
     db.commit()
     if cursor.rowcount == 0:

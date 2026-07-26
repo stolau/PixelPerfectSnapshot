@@ -46,6 +46,22 @@ Note: this does not strip a blocked element's own inline
 `style="background-image:url(...)"` — it is left as-is (and still inlined as a `data:` URI if
 same-origin).
 
+## Mask categories
+
+Pass `options.category` to tag a snapshot with a mask category — masks saved against that category
+in the viewer apply to every snapshot sharing it, regardless of `name`. Useful for a recurring
+same-position element (e.g. a version stamp) that appears across many differently-named snapshots,
+without repeating a per-image mask on each one:
+
+```ts
+const snapshot = await captureSnapshot(document, "checkout-page", {
+  category: "app-shell",
+});
+```
+
+All snapshots sharing a category must have the same viewport — the backend rejects an upload whose
+`category` conflicts with the viewport already established for it.
+
 ## Browser bundles
 
 The package also ships two dependency-free IIFE bundles for injecting into pages

@@ -1,0 +1,15 @@
+<svg width="120" height="120" viewBox="0 0 120 120" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>PixelPerfectSnapshot mark for dark surfaces</title>
+<desc>Light viewfinder brackets and brightened pixel checkmark on a dark background.</desc>
+<rect x="0" y="0" width="120" height="120" rx="16" fill="#0F172A"/>
+<rect x="30" y="60" width="10" height="10" fill="#2DD4BF"/>
+<rect x="40" y="70" width="10" height="10" fill="#22B8C9"/>
+<rect x="50" y="80" width="10" height="10" fill="#3B96E8"/>
+<rect x="60" y="70" width="10" height="10" fill="#5C7CF0"/>
+<rect x="70" y="60" width="10" height="10" fill="#6E6AF2"/>
+<rect x="80" y="50" width="10" height="10" fill="#7C6CF5"/>
+<path d="M20 38 L20 20 L38 20" fill="none" stroke="#F8FAFC" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M82 20 L100 20 L100 38" fill="none" stroke="#F8FAFC" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M100 82 L100 100 L82 100" fill="none" stroke="#F8FAFC" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M38 100 L20 100 L20 82" fill="none" stroke="#F8FAFC" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

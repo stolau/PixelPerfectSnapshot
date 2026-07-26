@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS snapshots (
     viewport_width INTEGER NOT NULL,
     viewport_height INTEGER NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
+    category TEXT,
     UNIQUE (run_id, name)
 );
 CREATE TABLE IF NOT EXISTS masks (
@@ -26,16 +27,26 @@ CREATE TABLE IF NOT EXISTS masks (
     name TEXT,
     viewport_width INTEGER,
     viewport_height INTEGER,
+    category TEXT,
     x INTEGER NOT NULL,
     y INTEGER NOT NULL,
     width INTEGER NOT NULL,
     height INTEGER NOT NULL,
-    CHECK ((name IS NULL AND viewport_width IS NULL AND viewport_height IS NULL)
-        OR (name IS NOT NULL AND viewport_width IS NOT NULL AND viewport_height IS NOT NULL))
+    CHECK (
+        (name IS NULL AND viewport_width IS NULL AND viewport_height IS NULL AND category IS NULL)
+        OR (name IS NOT NULL AND viewport_width IS NOT NULL AND viewport_height IS NOT NULL AND category IS NULL)
+        OR (name IS NULL AND viewport_width IS NULL AND viewport_height IS NULL AND category IS NOT NULL)
+    )
 );
 CREATE TABLE IF NOT EXISTS releases (
     id TEXT PRIMARY KEY,
     created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS approved_baselines (
+    name TEXT NOT NULL,
+    viewport_width INTEGER NOT NULL,
+    viewport_height INTEGER NOT NULL,
+    PRIMARY KEY (name, viewport_width, viewport_height)
 );
 """
 
