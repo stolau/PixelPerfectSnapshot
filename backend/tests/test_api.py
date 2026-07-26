@@ -1058,6 +1058,42 @@ def test_approve_branch_replace_writes_branch_history_not_master(client, tmp_pat
     assert not master_history.exists() or not list(master_history.glob("*.png"))
 
 
+def test_branch_scoped_history_endpoints_read_back_what_approve_wrote(client, tmp_path):
+    # Regression test: the two GET history endpoints used to always resolve the UNSCOPED history
+    # location, while approve_snapshot() already wrote branch-scoped history to the scoped
+    # location -- so a branch's real history was written but could never be read back through the
+    # API. This drives both GET endpoints for real, through the run they belong to, rather than
+    # asserting on the filesystem directly (test_approve_branch_replace_writes_branch_history_not_master
+    # already proves the write side; this proves the read side actually reaches it).
+    example = load_example()
+    run_1 = create_scoped_run(client, "branch", "feature-x")
+    upload_snapshot(client, run_1, example)
+    first_bytes = write_candidate_bytes(tmp_path, run_1, example["name"], (1, 2, 3))
+    assert client.post(f"/api/runs/{run_1}/snapshots/{example['name']}/approve").status_code == 200
+
+    run_2 = create_scoped_run(client, "branch", "feature-x")
+    upload_snapshot(client, run_2, example)
+    write_candidate_bytes(tmp_path, run_2, example["name"], (4, 5, 6))
+    assert client.post(f"/api/runs/{run_2}/snapshots/{example['name']}/approve").status_code == 200
+
+    history = client.get(f"/api/runs/{run_2}/snapshots/{example['name']}/history").get_json()
+    assert len(history["history"]) == 1
+    timestamp = history["history"][0]["timestamp"]
+
+    image_response = client.get(
+        f"/api/runs/{run_2}/snapshots/{example['name']}/history/{timestamp}"
+    )
+    assert image_response.status_code == 200
+    assert image_response.data == first_bytes
+
+    # A master (unscoped) run for the same (name, viewport) key sees no history at all -- proving
+    # the branch's history isn't just visible, it's visible from the correct scope only.
+    master_run = create_run(client)
+    upload_snapshot(client, master_run, example)
+    master_history = client.get(f"/api/runs/{master_run}/snapshots/{example['name']}/history")
+    assert master_history.get_json() == {"history": []}
+
+
 def test_merge_branch_promotes_files_to_master(client, tmp_path):
     example = load_example()
     width, height = example["viewport"]["width"], example["viewport"]["height"]

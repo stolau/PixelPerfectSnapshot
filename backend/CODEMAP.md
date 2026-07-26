@@ -47,11 +47,14 @@ approved baselines. HTTP contract: `docs/API.md`. Upload payload contract:
   category isn't self-blocked; 404 unknown run/snapshot),
   `GET /api/runs/<run_id>/snapshots/<name>/images/<kind>` (serves the PNGs; baseline resolution is
   scope-aware via `scoped_baseline_read_path()`; 404 until rendered),
-  `GET /api/runs/<run_id>/snapshots/<name>/history` (lists history entries newest-first),
-  `GET /api/runs/<run_id>/snapshots/<name>/history/<timestamp>` (serves a history PNG; 404 unknown
-  timestamp; NOTE: these two history endpoints are still unscoped — they always resolve the
-  master (name, viewport) history regardless of the run's scope; known limitation, out of scope
-  for this unit),
+  `GET /api/runs/<run_id>/snapshots/<name>/history` (lists history entries newest-first, via
+  `scoped_baseline_history_dir()`),
+  `GET /api/runs/<run_id>/snapshots/<name>/history/<timestamp>` (serves a history PNG via
+  `scoped_baseline_history_path()`; 404 unknown timestamp; both history endpoints were unscoped
+  until a `/campaign` survey caught it — `approve_snapshot()` already wrote branch/release history
+  to the scoped location, but these two GETs always resolved the unscoped master location, so a
+  scoped snapshot's history was write-only until the viewer's Branches & Releases view gave it a
+  real read path and made the gap user-visible),
   `POST /api/runs/<run_id>/snapshots/<name>/approve` (promotes the candidate PNG to the scope-aware
   baseline via `scoped_baseline_write_path()`, preserving the outgoing baseline under the matching
   `scoped_baseline_history_path()` when one already exists at that write path, status → `pass`; for

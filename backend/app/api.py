@@ -13,12 +13,11 @@ from flask import Blueprint, Response, current_app, jsonify, request, send_file,
 from app.db import get_db
 from app.render import (
     applicable_masks,
-    baseline_history_dir,
-    baseline_history_path,
     baseline_history_path_by_hash,
     category_viewport,
     image_path,
     process_pending,
+    scoped_baseline_history_dir,
     scoped_baseline_history_path,
     scoped_baseline_read_path,
     scoped_baseline_write_path,
@@ -385,13 +384,14 @@ def get_image(run_id: str, name: str, kind: str) -> Response | tuple[Response, i
 
 @bp.get("/runs/<run_id>/snapshots/<name>/history")
 def get_snapshot_history(run_id: str, name: str) -> tuple[Response, int] | dict[str, object]:
-    if _get_run(run_id) is None:
+    run = _get_run(run_id)
+    if run is None:
         return _error("run not found", 404)
     snapshot = _get_snapshot(run_id, name)
     if snapshot is None:
         return _error("snapshot not found", 404)
-    history_dir = baseline_history_dir(
-        current_app.config["DATA_DIR"],
+    history_dir = scoped_baseline_history_dir(
+        current_app.config["DATA_DIR"], run["scope_kind"], run["scope_id"],
         snapshot["name"], snapshot["viewport_width"], snapshot["viewport_height"],
     )
     timestamps = [p.stem for p in history_dir.glob("*.png")] if history_dir.exists() else []
@@ -400,13 +400,14 @@ def get_snapshot_history(run_id: str, name: str) -> tuple[Response, int] | dict[
 
 @bp.get("/runs/<run_id>/snapshots/<name>/history/<timestamp>")
 def get_snapshot_history_image(run_id: str, name: str, timestamp: str) -> Response | tuple[Response, int]:
-    if _get_run(run_id) is None:
+    run = _get_run(run_id)
+    if run is None:
         return _error("run not found", 404)
     snapshot = _get_snapshot(run_id, name)
     if snapshot is None:
         return _error("snapshot not found", 404)
-    path = baseline_history_path(
-        current_app.config["DATA_DIR"],
+    path = scoped_baseline_history_path(
+        current_app.config["DATA_DIR"], run["scope_kind"], run["scope_id"],
         snapshot["name"], snapshot["viewport_width"], snapshot["viewport_height"],
         timestamp,
     )
