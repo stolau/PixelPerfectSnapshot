@@ -30,8 +30,15 @@ approved baselines. HTTP contract: `docs/API.md`. Upload payload contract:
   with status `approved-baseline-missing`; `removedCount` — master `approved_baselines` keys not
   covered by this run's own snapshots, always MASTER-only regardless of the run's own scope, and
   not updated by branch-merge promotions — see `docs/API.md`),
-  `GET /api/runs/<run_id>`, `POST /api/runs/<run_id>/snapshots` (schema-validated),
-  `GET /api/runs/<run_id>/snapshots/<name>`,
+  `GET /api/runs/<run_id>`, `POST /api/runs/<run_id>/snapshots` (schema-validated; optional
+  `category` field — if given, rejected with 400 when it conflicts with the viewport already
+  established for that category by another snapshot, checked+inserted inside an explicit `BEGIN
+  IMMEDIATE` transaction so concurrent uploads into a brand-new category can't race past the
+  check),
+  `GET /api/runs/<run_id>/snapshots/<name>` (includes `category`, nullable),
+  `PATCH /api/runs/<run_id>/snapshots/<name>` (body `{"category": "<string>"|null}`; same
+  viewport-consistency check as upload, excluding the snapshot's own row so re-saving the same
+  category isn't self-blocked; 404 unknown run/snapshot),
   `GET /api/runs/<run_id>/snapshots/<name>/images/<kind>` (serves the PNGs; baseline resolution is
   scope-aware via `scoped_baseline_read_path()`; 404 until rendered),
   `GET /api/runs/<run_id>/snapshots/<name>/history` (lists history entries newest-first),
@@ -59,23 +66,36 @@ approved baselines. HTTP contract: `docs/API.md`. Upload payload contract:
   `POST /api/runs/<run_id>/process` (synchronously renders the run's pending snapshots, returns
   the `GET /api/runs/<run_id>` body; 500 if the rehydrate bundle is missing),
   `GET /api/masks` / `POST /api/masks` / `DELETE /api/masks/<mask_id>` (global masks, `name IS
-  NULL`; delete 404s if the id doesn't exist among global masks),
+  NULL AND category IS NULL` — the `category IS NULL` half is load-bearing now that category masks
+  also have `name IS NULL`; delete 404s if the id doesn't exist among global masks),
   `GET /api/runs/<run_id>/snapshots/<name>/masks` (the resolved, combined view via
-  `applicable_masks()` — global masks plus this snapshot's per-image masks; 404 unknown run or
-  name),
+  `applicable_masks()` — global masks plus this snapshot's per-image masks plus, when the snapshot
+  has a `category`, that category's masks; 404 unknown run or name),
   `POST /api/runs/<run_id>/snapshots/<name>/masks` (creates a per-image mask keyed by the
   snapshot's (name, viewport), like a baseline — applies to every future run of that test case;
   400 if the mask exceeds the resolved snapshot's viewport bounds; 404 unknown run or name),
   `DELETE /api/runs/<run_id>/snapshots/<name>/masks/<mask_id>` (scoped delete by (name, viewport);
-  404 unknown run/name or mask id not in that scope).
+  404 unknown run/name or mask id not in that scope),
+  `GET /api/categories/<category>/masks` / `POST /api/categories/<category>/masks` /
+  `DELETE /api/categories/<category>/masks/<mask_id>` (mask categories — a third scope, alongside
+  global and per-image: a mask saved against a category applies to every snapshot tagged with that
+  category, regardless of `name`, letting a recurring same-position element be masked once instead
+  of per-snapshot. `POST` 404s if the category isn't used by any snapshot yet — it looks up the
+  category's established viewport via `category_viewport()` to bounds-check the mask against, the
+  same way per-image masks are bounds-checked against their snapshot's viewport; `DELETE` 404s if
+  the id isn't a mask in that category. Purely a masking-grouping concept — `category` has no
+  effect on baseline identity/lookup, which stays keyed by (name, viewport) exactly as before).
 - `app/render.py` — render engine: `process_pending(run_id=None)` re-renders each `pending`
   snapshot (run-scoped when `run_id` is given; commits per snapshot) in headless Chromium
   (network aborted; injects the built `packages/client/dist/rehydrate.js`), screenshots a
   candidate PNG, and Pillow-diffs it against the approved baseline (`compare()`, always writes a
   red-on-grayscale diff PNG; accepts an optional `masks` list of `(x, y, width, height)` rectangles
   that are excluded from both the diff-ratio count and the red diff-PNG rendering).
-  `applicable_masks(db, name, width, height)` looks up the `masks` rows that apply to a given
-  snapshot (its own name+viewport, plus any global rows with `name IS NULL`). Path helpers:
+  `applicable_masks(db, name, width, height, category=None)` looks up the `masks` rows that apply
+  to a given snapshot (its own name+viewport, plus any global rows, plus any rows scoped to its
+  `category` when given). `category_viewport(db, category, exclude_snapshot_id=None)` looks up the
+  viewport already established for a category from the `snapshots` table (used to enforce
+  one-viewport-per-category and to bounds-check category mask creation). Path helpers:
   `baseline_path()`, `baseline_history_dir()`, `baseline_history_path()` (delegates to
   `baseline_history_path_by_hash(data_dir, key, timestamp)`, the hash-keyed primitive also used
   directly by the branch-merge endpoint), `image_path()`, and the scope-aware
@@ -87,6 +107,11 @@ approved baselines. HTTP contract: `docs/API.md`. Upload payload contract:
 - `app/db.py` — SQLite plumbing (stdlib `sqlite3`): schema, per-request connection via `flask.g`.
   `runs` has nullable `scope_kind`/`scope_id` columns (CHECK: both null or both set; `scope_kind`
   must be `branch` or `release` when set) and a `releases` table for release metadata.
+  `snapshots` has a nullable `category` column (no FK — a category exists only as a string shared
+  across snapshot rows). `masks` has a nullable `category` column alongside `name`/
+  `viewport_width`/`viewport_height`; a 3-way exclusive CHECK enforces exactly one scope per row:
+  all four null (global), `name`+viewport set and `category` null (per-image), or `category` set
+  and the other three null (category-scope).
   `approved_baselines` (`name`, `viewport_width`, `viewport_height` primary key) is a pure
   existence index of (name, viewport) keys with a current MASTER-scoped approved baseline —
   upserted by `approve_snapshot`, read by `GET /api/runs`'s `removedCount` computation; has no

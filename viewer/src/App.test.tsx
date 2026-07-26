@@ -577,6 +577,87 @@ test("delete removes the mask once the refetch reflects it gone", async () => {
   expect(requests()).toContainEqual({ method: "DELETE", url: "/api/masks/42" });
 });
 
+const CATEGORY = "Example Base";
+const CATEGORY_MASKS_URL = `/api/categories/${encodeURIComponent(CATEGORY)}/masks`;
+
+test("category field shows the current value; saving PATCHes the snapshot", async () => {
+  routes[`GET ${SNAPSHOT_URL}`] = { body: { ...snapshotDetailFixture, category: CATEGORY } };
+  routes[`PATCH ${SNAPSHOT_URL}`] = { body: { name: SNAPSHOT_NAME, category: "Renamed" } };
+  await openSnapshotDetail();
+
+  const input = (await screen.findByLabelText("Category")) as HTMLInputElement;
+  expect(input.value).toBe(CATEGORY);
+
+  fireEvent.change(input, { target: { value: "Renamed" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save category" }));
+
+  await waitFor(() => {
+    expect(requestBody("PATCH", SNAPSHOT_URL)).toEqual({ category: "Renamed" });
+  });
+});
+
+test("mask scope picker offers no category option when the snapshot has no category", async () => {
+  routes[`GET ${SNAPSHOT_URL}`] = { body: snapshotDetailRenderedFixture }; // category: null
+  routes["POST /api/masks"] = { body: { id: 1, x: 0, y: 0, width: 50, height: 25 } };
+  await openSnapshotDetail();
+
+  const restoreLayout = stubOverlayLayout();
+  try {
+    const img = await screen.findByAltText("candidate");
+    loadCandidateImage(img);
+    dragOverlay(screen.getByTestId("mask-overlay"));
+    await screen.findByTestId("mask-scope-picker");
+
+    expect(screen.queryByRole("button", { name: "Save as mask for this category" })).toBeNull();
+  } finally {
+    restoreLayout();
+  }
+});
+
+test("draw + save as mask for this category POSTs to the category masks endpoint and refetches it", async () => {
+  routes[`GET ${SNAPSHOT_URL}`] = { body: { ...snapshotDetailRenderedFixture, category: CATEGORY } };
+  routes[`GET ${CATEGORY_MASKS_URL}`] = { body: { masks: [] } };
+  routes[`POST ${CATEGORY_MASKS_URL}`] = { body: { id: 4, x: 0, y: 0, width: 50, height: 25 } };
+  await openSnapshotDetail();
+
+  const restoreLayout = stubOverlayLayout();
+  try {
+    const img = await screen.findByAltText("candidate");
+    loadCandidateImage(img);
+    dragOverlay(screen.getByTestId("mask-overlay"));
+    await screen.findByTestId("mask-scope-picker");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save as mask for this category" }));
+    await waitFor(() => {
+      expect(screen.queryByTestId("mask-scope-picker")).toBeNull();
+    });
+
+    expect(requestBody("POST", CATEGORY_MASKS_URL)).toEqual({ x: 0, y: 0, width: 50, height: 25 });
+
+    const categoryMaskGets = requests().filter(
+      (r) => r.method === "GET" && r.url === CATEGORY_MASKS_URL,
+    );
+    expect(categoryMaskGets.length).toBe(2); // mount fetch (category is set) + post-create refetch
+  } finally {
+    restoreLayout();
+  }
+});
+
+test("mask overlay renders category masks with a working delete button", async () => {
+  routes[`GET ${SNAPSHOT_URL}`] = { body: { ...snapshotDetailRenderedFixture, category: CATEGORY } };
+  const rect = { x: 10, y: 20, width: 30, height: 40 };
+  routes[`GET ${SNAPSHOT_URL}/masks`] = { body: { masks: [rect] } };
+  routes[`GET ${CATEGORY_MASKS_URL}`] = { body: { masks: [{ id: 42, ...rect }] } };
+  await openSnapshotDetail();
+
+  const img = await screen.findByAltText("candidate");
+  fireEvent.load(img);
+
+  const rects = await screen.findAllByTestId("mask-rect");
+  expect(rects.length).toBe(1);
+  expect(screen.getByTestId("mask-delete-category-42")).toBeDefined();
+});
+
 test("create mask failure surfaces the ApiError message and clears the pending rect", async () => {
   routes[`GET ${SNAPSHOT_URL}`] = { body: snapshotDetailRenderedFixture };
   routes["POST /api/masks"] = { status: 400, body: { error: "Rect out of bounds" } };

@@ -2,6 +2,7 @@ import json
 import re
 import sqlite3
 from pathlib import Path
+from urllib.parse import quote
 
 import pytest
 from PIL import Image
@@ -105,6 +106,7 @@ def test_snapshot_detail(client):
         "name": example["name"],
         "viewport": example["viewport"],
         "status": "pending",
+        "category": None,
         "baselineUrl": None,
         "candidateUrl": None,
         "diffUrl": None,
@@ -536,6 +538,225 @@ def test_mask_endpoints_unknown_snapshot_404(client):
         )
         assert response.status_code == 404
         assert "error" in response.get_json()
+
+
+# --- mask categories --------------------------------------------------------
+
+CATEGORY = "Example Base"
+CATEGORY_URL = quote(CATEGORY, safe="")
+
+
+def test_upload_snapshot_with_category(client):
+    example = load_example()
+    run_id = create_run(client)
+    upload_snapshot(client, run_id, dict(example, category=CATEGORY))
+
+    response = client.get(f"/api/runs/{run_id}/snapshots/{example['name']}")
+    assert response.get_json()["category"] == CATEGORY
+
+
+def test_upload_snapshot_category_viewport_conflict_400(client):
+    example = load_example()  # viewport 1280x720
+    run_1 = create_run(client)
+    upload_snapshot(client, run_1, dict(example, category=CATEGORY))
+
+    run_2 = create_run(client)
+    conflicting = dict(example, category=CATEGORY, viewport={"width": 640, "height": 480})
+    response = client.post(f"/api/runs/{run_2}/snapshots", json=conflicting)
+    assert response.status_code == 400
+    assert "error" in response.get_json()
+    # Rejected snapshot must not have been inserted.
+    assert client.get(f"/api/runs/{run_2}").get_json()["snapshots"] == []
+
+
+def test_upload_snapshot_category_same_viewport_ok(client):
+    example = load_example()
+    run_1 = create_run(client)
+    upload_snapshot(client, run_1, dict(example, category=CATEGORY))
+
+    run_2 = create_run(client)
+    other_name = dict(example, name="other-page", category=CATEGORY)
+    response = client.post(f"/api/runs/{run_2}/snapshots", json=other_name)
+    assert response.status_code == 201
+
+
+def test_patch_snapshot_category(client):
+    example = load_example()
+    run_id = create_run(client)
+    upload_snapshot(client, run_id, example)
+
+    response = client.patch(
+        f"/api/runs/{run_id}/snapshots/{example['name']}", json={"category": CATEGORY}
+    )
+    assert response.status_code == 200
+    assert response.get_json() == {"name": example["name"], "category": CATEGORY}
+    assert (
+        client.get(f"/api/runs/{run_id}/snapshots/{example['name']}").get_json()["category"]
+        == CATEGORY
+    )
+
+
+def test_patch_snapshot_category_clear_to_null(client):
+    example = load_example()
+    run_id = create_run(client)
+    upload_snapshot(client, run_id, dict(example, category=CATEGORY))
+
+    response = client.patch(f"/api/runs/{run_id}/snapshots/{example['name']}", json={"category": None})
+    assert response.status_code == 200
+    assert (
+        client.get(f"/api/runs/{run_id}/snapshots/{example['name']}").get_json()["category"] is None
+    )
+
+
+def test_patch_snapshot_category_viewport_conflict_400(client):
+    example = load_example()
+    run_1 = create_run(client)
+    upload_snapshot(client, run_1, dict(example, category=CATEGORY))
+
+    run_2 = create_run(client)
+    upload_snapshot(client, run_2, dict(example, viewport={"width": 640, "height": 480}))
+
+    response = client.patch(f"/api/runs/{run_2}/snapshots/{example['name']}", json={"category": CATEGORY})
+    assert response.status_code == 400
+    assert "error" in response.get_json()
+
+
+def test_patch_snapshot_category_self_reassign_not_blocked(client):
+    # Re-saving the same category on the snapshot that already established it
+    # must not self-block (exclude_snapshot_id must exclude the row being edited).
+    example = load_example()
+    run_id = create_run(client)
+    upload_snapshot(client, run_id, dict(example, category=CATEGORY))
+
+    response = client.patch(f"/api/runs/{run_id}/snapshots/{example['name']}", json={"category": CATEGORY})
+    assert response.status_code == 200
+
+
+def test_patch_snapshot_category_validation_400(client):
+    example = load_example()
+    run_id = create_run(client)
+    upload_snapshot(client, run_id, example)
+
+    for payload in [{}, {"category": ""}, {"category": 123}, {"category": True}]:
+        response = client.patch(f"/api/runs/{run_id}/snapshots/{example['name']}", json=payload)
+        assert response.status_code == 400, payload
+        assert "error" in response.get_json()
+
+
+def test_patch_snapshot_unknown_run_or_snapshot_404(client):
+    example = load_example()
+    run_id = create_run(client)
+    upload_snapshot(client, run_id, example)
+
+    response = client.patch(f"/api/runs/bogus/snapshots/{example['name']}", json={"category": "x"})
+    assert response.status_code == 404
+
+    response = client.patch(f"/api/runs/{run_id}/snapshots/no-such-name", json={"category": "x"})
+    assert response.status_code == 404
+
+
+def test_category_mask_create_list_delete(client):
+    example = load_example()
+    run_id = create_run(client)
+    upload_snapshot(client, run_id, dict(example, category=CATEGORY))
+
+    response = client.post(
+        f"/api/categories/{CATEGORY_URL}/masks", json={"x": 10, "y": 20, "width": 30, "height": 40}
+    )
+    assert response.status_code == 201
+    created = response.get_json()
+    assert created == {"id": created["id"], "x": 10, "y": 20, "width": 30, "height": 40}
+
+    response = client.get(f"/api/categories/{CATEGORY_URL}/masks")
+    assert response.status_code == 200
+    assert response.get_json() == {"masks": [created]}
+
+    response = client.delete(f"/api/categories/{CATEGORY_URL}/masks/{created['id']}")
+    assert response.status_code == 204
+    assert client.get(f"/api/categories/{CATEGORY_URL}/masks").get_json() == {"masks": []}
+
+
+def test_category_mask_unknown_category_404(client):
+    response = client.post(
+        f"/api/categories/{CATEGORY_URL}/masks", json={"x": 0, "y": 0, "width": 10, "height": 10}
+    )
+    assert response.status_code == 404
+    assert "error" in response.get_json()
+
+
+def test_category_mask_bounds_400(client):
+    example = load_example()  # viewport is 1280x720
+    run_id = create_run(client)
+    upload_snapshot(client, run_id, dict(example, category=CATEGORY))
+    url = f"/api/categories/{CATEGORY_URL}/masks"
+
+    response = client.post(url, json={"x": 1270, "y": 0, "width": 20, "height": 10})
+    assert response.status_code == 400
+    assert "error" in response.get_json()
+
+    # Sanity: a mask that exactly fits the category's established viewport is accepted.
+    response = client.post(url, json={"x": 1260, "y": 700, "width": 20, "height": 20})
+    assert response.status_code == 201
+
+
+def test_category_mask_validation_400(client):
+    example = load_example()
+    run_id = create_run(client)
+    upload_snapshot(client, run_id, dict(example, category=CATEGORY))
+
+    for payload in INVALID_MASK_PAYLOADS:
+        response = client.post(f"/api/categories/{CATEGORY_URL}/masks", json=payload)
+        assert response.status_code == 400, payload
+        assert "error" in response.get_json()
+
+
+def test_category_masks_not_leaked_via_global_endpoints(client):
+    # Regression test: list_masks/delete_mask must not treat category masks as global,
+    # since both share "name IS NULL" and only category now distinguishes them.
+    example = load_example()
+    run_id = create_run(client)
+    upload_snapshot(client, run_id, dict(example, category=CATEGORY))
+    category_mask = client.post(
+        f"/api/categories/{CATEGORY_URL}/masks", json={"x": 1, "y": 2, "width": 3, "height": 4}
+    ).get_json()
+
+    assert client.get("/api/masks").get_json() == {"masks": []}
+
+    response = client.delete(f"/api/masks/{category_mask['id']}")
+    assert response.status_code == 404
+    assert client.get(f"/api/categories/{CATEGORY_URL}/masks").get_json()["masks"] == [category_mask]
+
+
+def test_snapshot_masks_include_category_layer(client):
+    example = load_example()
+    run_id = create_run(client)
+    upload_snapshot(client, run_id, dict(example, category=CATEGORY))
+
+    client.post("/api/masks", json={"x": 0, "y": 0, "width": 5, "height": 5})
+    client.post(
+        f"/api/runs/{run_id}/snapshots/{example['name']}/masks",
+        json={"x": 50, "y": 50, "width": 5, "height": 5},
+    )
+    client.post(f"/api/categories/{CATEGORY_URL}/masks", json={"x": 100, "y": 100, "width": 5, "height": 5})
+
+    masks = client.get(f"/api/runs/{run_id}/snapshots/{example['name']}/masks").get_json()["masks"]
+    assert {"x": 0, "y": 0, "width": 5, "height": 5} in masks
+    assert {"x": 50, "y": 50, "width": 5, "height": 5} in masks
+    assert {"x": 100, "y": 100, "width": 5, "height": 5} in masks
+    assert len(masks) == 3
+
+
+def test_snapshot_without_category_gets_no_category_masks(client):
+    example = load_example()
+    run_1 = create_run(client)
+    upload_snapshot(client, run_1, dict(example, category=CATEGORY))
+    client.post(f"/api/categories/{CATEGORY_URL}/masks", json={"x": 100, "y": 100, "width": 5, "height": 5})
+
+    run_2 = create_run(client)
+    upload_snapshot(client, run_2, example)  # same name/viewport, no category
+
+    response = client.get(f"/api/runs/{run_2}/snapshots/{example['name']}/masks")
+    assert response.get_json() == {"masks": []}
 
 
 def test_cors_headers_on_413(tmp_path, monkeypatch):

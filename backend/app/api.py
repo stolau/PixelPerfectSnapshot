@@ -16,6 +16,7 @@ from app.render import (
     baseline_history_dir,
     baseline_history_path,
     baseline_history_path_by_hash,
+    category_viewport,
     image_path,
     process_pending,
     scoped_baseline_history_path,
@@ -79,7 +80,7 @@ def _get_run(run_id: str) -> sqlite3.Row | None:
 
 def _get_snapshot(run_id: str, name: str) -> sqlite3.Row | None:
     return get_db().execute(
-        "SELECT id, name, viewport_width, viewport_height, status"
+        "SELECT id, name, viewport_width, viewport_height, status, category"
         " FROM snapshots WHERE run_id = ? AND name = ?",
         (run_id, name),
     ).fetchone()
@@ -231,12 +232,29 @@ def upload_snapshot(run_id: str) -> tuple[Response, int] | tuple[dict[str, str],
     schema_error = next(_VALIDATOR.iter_errors(payload), None)
     if schema_error is not None:
         return _error(schema_error.message, 400)
+    category = payload.get("category")
     db = get_db()
+    if category is not None:
+        db.execute("BEGIN IMMEDIATE")
     try:
+        if category is not None:
+            existing = category_viewport(db, category)
+            wanted = (payload["viewport"]["width"], payload["viewport"]["height"])
+            if existing is not None and existing != wanted:
+                db.rollback()
+                return _error(
+                    f"category {category!r} is already used with viewport"
+                    f" {existing[0]}x{existing[1]}",
+                    400,
+                )
         cursor = db.execute(
-            "INSERT INTO snapshots (run_id, name, viewport_width, viewport_height)"
-            " VALUES (?, ?, ?, ?)",
-            (run_id, payload["name"], payload["viewport"]["width"], payload["viewport"]["height"]),
+            "INSERT INTO snapshots (run_id, name, viewport_width, viewport_height, category)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (
+                run_id, payload["name"],
+                payload["viewport"]["width"], payload["viewport"]["height"],
+                category,
+            ),
         )
     except sqlite3.IntegrityError:
         return _error(f"snapshot named {payload['name']!r} already exists in this run", 409)
@@ -292,10 +310,43 @@ def get_snapshot(run_id: str, name: str) -> tuple[Response, int] | dict[str, obj
             "height": snapshot["viewport_height"],
         },
         "status": snapshot["status"],
+        "category": snapshot["category"],
         "baselineUrl": image_url("baseline"),
         "candidateUrl": image_url("candidate"),
         "diffUrl": image_url("diff"),
     }
+
+
+@bp.patch("/runs/<run_id>/snapshots/<name>")
+def update_snapshot_category(run_id: str, name: str) -> tuple[Response, int] | tuple[dict[str, object], int]:
+    if _get_run(run_id) is None:
+        return _error("run not found", 404)
+    snapshot = _get_snapshot(run_id, name)
+    if snapshot is None:
+        return _error("snapshot not found", 404)
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or "category" not in payload:
+        return _error("request body must be a JSON object with a 'category' key", 400)
+    category = payload["category"]
+    if category is not None and (not isinstance(category, str) or not category):
+        return _error("category must be a non-empty string or null", 400)
+    db = get_db()
+    db.execute("BEGIN IMMEDIATE")
+    if category is not None:
+        existing = category_viewport(db, category, exclude_snapshot_id=snapshot["id"])
+        wanted = (snapshot["viewport_width"], snapshot["viewport_height"])
+        if existing is not None and existing != wanted:
+            db.rollback()
+            return _error(
+                f"category {category!r} is already used with viewport {existing[0]}x{existing[1]}",
+                400,
+            )
+    db.execute(
+        "UPDATE snapshots SET category = ? WHERE run_id = ? AND name = ?",
+        (category, run_id, name),
+    )
+    db.commit()
+    return {"name": name, "category": category}, 200
 
 
 @bp.get("/runs/<run_id>/snapshots/<name>/images/<any(baseline,candidate,diff):kind>")
@@ -424,7 +475,8 @@ def process_run(run_id: str) -> tuple[Response, int] | dict[str, object]:
 @bp.get("/masks")
 def list_masks() -> dict[str, list[dict[str, int]]]:
     rows = get_db().execute(
-        "SELECT id, x, y, width, height FROM masks WHERE name IS NULL ORDER BY id"
+        "SELECT id, x, y, width, height FROM masks"
+        " WHERE name IS NULL AND category IS NULL ORDER BY id"
     ).fetchall()
     return {
         "masks": [
@@ -459,7 +511,9 @@ def create_mask() -> tuple[Response, int] | tuple[dict[str, int], int]:
 @bp.delete("/masks/<int:mask_id>")
 def delete_mask(mask_id: int) -> tuple[Response, int] | tuple[str, int]:
     db = get_db()
-    cursor = db.execute("DELETE FROM masks WHERE id = ? AND name IS NULL", (mask_id,))
+    cursor = db.execute(
+        "DELETE FROM masks WHERE id = ? AND name IS NULL AND category IS NULL", (mask_id,)
+    )
     db.commit()
     if cursor.rowcount == 0:
         return _error("mask not found", 404)
@@ -474,7 +528,8 @@ def list_snapshot_masks(run_id: str, name: str) -> tuple[Response, int] | dict[s
     if snapshot is None:
         return _error("snapshot not found", 404)
     masks = applicable_masks(
-        get_db(), snapshot["name"], snapshot["viewport_width"], snapshot["viewport_height"]
+        get_db(), snapshot["name"], snapshot["viewport_width"], snapshot["viewport_height"],
+        snapshot["category"],
     )
     return {
         "masks": [
@@ -534,6 +589,59 @@ def delete_snapshot_mask(run_id: str, name: str, mask_id: int) -> tuple[Response
     cursor = db.execute(
         "DELETE FROM masks WHERE id = ? AND name = ? AND viewport_width = ? AND viewport_height = ?",
         (mask_id, snapshot["name"], snapshot["viewport_width"], snapshot["viewport_height"]),
+    )
+    db.commit()
+    if cursor.rowcount == 0:
+        return _error("mask not found", 404)
+    return "", 204
+
+
+@bp.get("/categories/<category>/masks")
+def list_category_masks(category: str) -> dict[str, list[dict[str, int]]]:
+    rows = get_db().execute(
+        "SELECT id, x, y, width, height FROM masks WHERE category = ? ORDER BY id", (category,)
+    ).fetchall()
+    return {
+        "masks": [
+            {"id": row["id"], "x": row["x"], "y": row["y"], "width": row["width"], "height": row["height"]}
+            for row in rows
+        ]
+    }
+
+
+@bp.post("/categories/<category>/masks")
+def create_category_mask(category: str) -> tuple[Response, int] | tuple[dict[str, int], int]:
+    viewport = category_viewport(get_db(), category)
+    if viewport is None:
+        return _error(f"category {category!r} is not used by any snapshot", 404)
+    payload = request.get_json(silent=True)
+    validation_error = _validate_mask_payload(payload)
+    if validation_error is not None:
+        return _error(validation_error, 400)
+    width, height = viewport
+    if payload["x"] + payload["width"] > width or payload["y"] + payload["height"] > height:
+        return _error("mask exceeds category viewport bounds", 400)
+    db = get_db()
+    cursor = db.execute(
+        "INSERT INTO masks (name, viewport_width, viewport_height, category, x, y, width, height)"
+        " VALUES (NULL, NULL, NULL, ?, ?, ?, ?, ?)",
+        (category, payload["x"], payload["y"], payload["width"], payload["height"]),
+    )
+    db.commit()
+    return {
+        "id": cursor.lastrowid,
+        "x": payload["x"],
+        "y": payload["y"],
+        "width": payload["width"],
+        "height": payload["height"],
+    }, 201
+
+
+@bp.delete("/categories/<category>/masks/<int:mask_id>")
+def delete_category_mask(category: str, mask_id: int) -> tuple[Response, int] | tuple[str, int]:
+    db = get_db()
+    cursor = db.execute(
+        "DELETE FROM masks WHERE id = ? AND category = ?", (mask_id, category)
     )
     db.commit()
     if cursor.rowcount == 0:

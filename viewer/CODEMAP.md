@@ -22,18 +22,28 @@ Consumes the backend HTTP API (`docs/API.md`).
   shows a "History" section (thumbnails of prior baselines, newest-first), fetched on mount and
   refetched after a successful approve. Run detail shows a "Process pending" button when any
   snapshot is pending, which POSTs `/process` then refetches the run (same pattern as approve's
-  post-action refetch) before repainting statuses. Snapshot detail's candidate image (when
-  available) is wrapped in a "Masks" overlay: it fetches this snapshot's combined masks and the
-  global mask list on mount, renders each applicable mask as a semi-transparent rect scaled to the
-  displayed image size, and lets you drag a new rectangle on the image to open a "Save as global
-  mask" / "Save as mask for this snapshot" picker (a `<h2>Masks</h2>` section below History holds
-  that picker and any mask error). Delete is available only for masks whose id can be proven:
-  global masks (cross-referenced against `GET /api/masks`) and masks created in the current
-  browser session (tracked client-side from their create response, deduplicated by identity
-  against refetched global masks to avoid double-binding when duplicate-rect masks exist).
-  Pre-existing per-image masks — fetched only via the id-less combined endpoint and not created
-  this session — have no delete button, because no endpoint lists per-image masks together with
-  their ids. This is a known limitation of the current (frozen) API surface, not a bug. All four
+  post-action refetch) before repainting statuses. Snapshot detail shows an inline-editable
+  "Category" text field (empty string ↔ `null`) next to the status pill; "Save category" PATCHes
+  it via `updateSnapshotCategory()` and updates local state directly (no refetch). Snapshot
+  detail's candidate image (when available) is wrapped in a "Masks" overlay: it fetches this
+  snapshot's combined masks (global + per-image +, when the snapshot has a category, that
+  category's masks — all three layers already unioned server-side by `applicable_masks()`), the
+  global mask list, and — only when the snapshot has a `category` — that category's mask list, all
+  on mount (the category-mask fetch is a separate effect keyed on `snapshot?.category` since the
+  category isn't known until the snapshot itself has loaded). It renders each applicable mask as a
+  semi-transparent rect scaled to the displayed image size, and lets you drag a new rectangle on
+  the image to open a scope picker — "Save as global mask" / "Save as mask for this snapshot", plus
+  "Save as mask for this category" when the open snapshot has a category set (a `<h2>Masks</h2>`
+  section below History holds that picker and any mask error). Delete is available only for masks
+  whose id can be proven: global and category masks (cross-referenced against `GET /api/masks` /
+  `GET /api/categories/<category>/masks`) and masks created in the current browser session
+  (tracked client-side from their create response, deduplicated by identity against refetched
+  global/category masks to avoid double-binding when duplicate-rect masks exist). Pre-existing
+  per-image masks — fetched only via the id-less combined endpoint and not created this session —
+  have no delete button, because no endpoint lists per-image masks together with their ids. This is
+  a known limitation of the current (frozen) API surface, not a bug. `resolveMaskIds()` takes all
+  three id-bearing pools (session-created, global, category) and binds each rendered rect to a
+  `{scope, id}` by identity, where `scope` is now `"global" | "per-image" | "category"`. All four
   `<img>` sites (baseline, candidate, diff, history thumbnails) render through
   `AuthenticatedImage` (see below) rather than plain `<img>`.
 - `src/authToken.ts` — sessionStorage-backed auth token: `getAuthToken()` / `setAuthToken(token)`
@@ -59,14 +69,18 @@ Consumes the backend HTTP API (`docs/API.md`).
   `GET /api/runs`.
   Also exports `imageUrl(path)`, which applies the same `VITE_API_BASE` prefix to image srcs, and
   `getSnapshotHistory(id, name)` / `historyImageUrl(id, name, timestamp)` for the history list and
-  its per-entry image URLs. Mask CRUD: `Mask` (has `id`) and `MaskRect` (no `id`, the shape
-  returned by the combined per-snapshot masks endpoint) types, plus `listGlobalMasks()` /
-  `createGlobalMask(rect)` / `deleteGlobalMask(id)` for global masks and `listSnapshotMasks(id,
-  name)` / `createSnapshotMask(id, name, rect)` / `deleteSnapshotMask(id, name, maskId)` for
-  per-image masks. `request<T>()` treats a `204` response as success with no body (does not call
-  `.json()`), which the delete-mask endpoints rely on. `request<T>()` merges `authHeaders()` into
-  whatever headers the call already sends (e.g. `Content-Type` on mask creates), so it's a no-op
-  when no token is stored.
+  its per-entry image URLs. `SnapshotDetail` includes `category: string | null`;
+  `updateSnapshotCategory(id, name, category)` PATCHes it. Mask CRUD: `Mask` (has `id`) and
+  `MaskRect` (no `id`, the shape returned by the combined per-snapshot masks endpoint) types, plus
+  `listGlobalMasks()` / `createGlobalMask(rect)` / `deleteGlobalMask(id)` for global masks,
+  `listSnapshotMasks(id, name)` / `createSnapshotMask(id, name, rect)` / `deleteSnapshotMask(id,
+  name, maskId)` for per-image masks, and `listCategoryMasks(category)` /
+  `createCategoryMask(category, rect)` / `deleteCategoryMask(category, id)` for category masks
+  (category is `encodeURIComponent`-escaped into the URL path, so categories containing spaces or
+  other reserved characters work). `request<T>()` treats a `204` response as success with no body
+  (does not call `.json()`), which the delete-mask endpoints rely on. `request<T>()` merges
+  `authHeaders()` into whatever headers the call already sends (e.g. `Content-Type` on mask
+  creates), so it's a no-op when no token is stored.
 - `src/fixtures/` — contract-verbatim API response fixtures used by tests.
 - `src/test-setup.ts` — vitest `setupFiles` entry: stubs `URL.createObjectURL`/`revokeObjectURL`
   (unimplemented in jsdom), which `AuthenticatedImage` needs in every test.

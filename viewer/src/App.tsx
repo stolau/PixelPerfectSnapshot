@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import {
   approveSnapshot,
   ApiError,
+  createCategoryMask,
   createGlobalMask,
   createSnapshotMask,
+  deleteCategoryMask,
   deleteGlobalMask,
   deleteSnapshotMask,
   getRun,
@@ -11,10 +13,12 @@ import {
   getSnapshotHistory,
   historyImageUrl,
   imageUrl,
+  listCategoryMasks,
   listGlobalMasks,
   listRuns,
   listSnapshotMasks,
   processRun,
+  updateSnapshotCategory,
 } from "./api.js";
 import type {
   HistoryEntry,
@@ -321,10 +325,12 @@ function RunDetail({
   );
 }
 
+type MaskScope = "global" | "per-image" | "category";
+
 function resolveMaskIds(
   rendered: MaskRect[],
   createdMasks: {
-    scope: "global" | "per-image";
+    scope: MaskScope;
     id: number;
     x: number;
     y: number;
@@ -332,19 +338,21 @@ function resolveMaskIds(
     height: number;
   }[],
   globalMasks: Mask[],
-): ({ scope: "global" | "per-image"; id: number } | null)[] {
+  categoryMasks: Mask[],
+): ({ scope: MaskScope; id: number } | null)[] {
   const rectKey = (r: { x: number; y: number; width: number; height: number }) =>
     `${r.x},${r.y},${r.width},${r.height}`;
 
   const poolById = new Map<
     string,
-    { scope: "global" | "per-image"; id: number; x: number; y: number; width: number; height: number }
+    { scope: MaskScope; id: number; x: number; y: number; width: number; height: number }
   >();
   for (const c of createdMasks) poolById.set(`${c.scope}:${c.id}`, c);
   for (const g of globalMasks) poolById.set(`global:${g.id}`, { scope: "global", ...g });
+  for (const c of categoryMasks) poolById.set(`category:${c.id}`, { scope: "category", ...c });
   const pool = [...poolById.values()];
 
-  const bindings: ({ scope: "global" | "per-image"; id: number } | null)[] = rendered.map(() => null);
+  const bindings: ({ scope: MaskScope; id: number } | null)[] = rendered.map(() => null);
   const used = new Set<number>();
   for (const candidate of pool) {
     const idx = rendered.findIndex((r, i) => !used.has(i) && rectKey(r) === rectKey(candidate));
@@ -390,9 +398,12 @@ function SnapshotDetail({
   const [masks, setMasks] = useState<MaskRect[] | null>(null);
   const [masksError, setMasksError] = useState<string | null>(null);
   const [globalMasks, setGlobalMasks] = useState<Mask[] | null>(null);
+  const [categoryMasks, setCategoryMasks] = useState<Mask[] | null>(null);
   const [createdMasks, setCreatedMasks] = useState<
-    { scope: "global" | "per-image"; id: number; x: number; y: number; width: number; height: number }[]
+    { scope: MaskScope; id: number; x: number; y: number; width: number; height: number }[]
   >([]);
+  const [categoryInput, setCategoryInput] = useState("");
+  const [categoryError, setCategoryError] = useState<string | null>(null);
   const [drawStart, setDrawStart] = useState<{ x: number; y: number } | null>(null);
   const [drawCurrent, setDrawCurrent] = useState<{ x: number; y: number } | null>(null);
   const [pendingRect, setPendingRect] = useState<{
@@ -407,7 +418,13 @@ function SnapshotDetail({
   const overlayRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    getSnapshot(runId, name).then(setSnapshot, (err: Error) => setError(err.message));
+    getSnapshot(runId, name).then(
+      (detail) => {
+        setSnapshot(detail);
+        setCategoryInput(detail.category ?? "");
+      },
+      (err: Error) => setError(err.message),
+    );
   }, [runId, name]);
 
   useEffect(() => {
@@ -424,30 +441,48 @@ function SnapshotDetail({
     );
   }, [runId, name]);
 
-  async function refetchMasks(refetchGlobal: boolean) {
+  useEffect(() => {
+    const category = snapshot?.category ?? null;
+    if (category === null) {
+      setCategoryMasks([]);
+      return;
+    }
+    listCategoryMasks(category).then(setCategoryMasks, (err: Error) => setMasksError(err.message));
+  }, [snapshot?.category]);
+
+  async function refetchMasks(scope: MaskScope) {
     try {
       const snapshotMasks = await listSnapshotMasks(runId, name);
       setMasks(snapshotMasks);
-      if (refetchGlobal) {
+      if (scope === "global") {
         const global = await listGlobalMasks();
         setGlobalMasks(global);
+      } else if (scope === "category" && snapshot?.category != null) {
+        const category = await listCategoryMasks(snapshot.category);
+        setCategoryMasks(category);
       }
     } catch (err) {
       setMasksError((err as Error).message);
     }
   }
 
-  async function createMask(scope: "global" | "per-image") {
+  async function createMask(scope: MaskScope) {
     if (pendingRect === null) return;
+    const category = snapshot?.category ?? null;
+    if (scope === "category" && category === null) return;
     setMasksError(null);
     try {
-      const response =
-        scope === "global"
-          ? await createGlobalMask(pendingRect)
-          : await createSnapshotMask(runId, name, pendingRect);
+      let response: Mask;
+      if (scope === "global") {
+        response = await createGlobalMask(pendingRect);
+      } else if (scope === "per-image") {
+        response = await createSnapshotMask(runId, name, pendingRect);
+      } else {
+        response = await createCategoryMask(category!, pendingRect);
+      }
       setCreatedMasks((prev) => [...prev, { scope, ...response }]);
       setPendingRect(null);
-      await refetchMasks(scope === "global");
+      await refetchMasks(scope);
     } catch (err) {
       if (err instanceof ApiError) {
         setMasksError(`Create mask failed (${err.status}): ${err.message}`);
@@ -458,21 +493,40 @@ function SnapshotDetail({
     }
   }
 
-  async function deleteMask(scope: "global" | "per-image", id: number) {
+  async function deleteMask(scope: MaskScope, id: number) {
+    const category = snapshot?.category ?? null;
+    if (scope === "category" && category === null) return;
     setMasksError(null);
     try {
       if (scope === "global") {
         await deleteGlobalMask(id);
-      } else {
+      } else if (scope === "per-image") {
         await deleteSnapshotMask(runId, name, id);
+      } else {
+        await deleteCategoryMask(category!, id);
       }
       setCreatedMasks((prev) => prev.filter((m) => !(m.scope === scope && m.id === id)));
-      await refetchMasks(scope === "global");
+      await refetchMasks(scope);
     } catch (err) {
       if (err instanceof ApiError) {
         setMasksError(`Delete mask failed (${err.status}): ${err.message}`);
       } else {
         setMasksError(`Delete mask failed: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  async function saveCategory() {
+    setCategoryError(null);
+    const value = categoryInput.trim() === "" ? null : categoryInput.trim();
+    try {
+      await updateSnapshotCategory(runId, name, value);
+      setSnapshot((prev) => (prev !== null ? { ...prev, category: value } : prev));
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setCategoryError(`Save category failed (${err.status}): ${err.message}`);
+      } else {
+        setCategoryError(`Save category failed: ${(err as Error).message}`);
       }
     }
   }
@@ -549,6 +603,22 @@ function SnapshotDetail({
           >
             Status: {snapshot.status}
           </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+              Category
+              <input
+                type="text"
+                value={categoryInput}
+                onChange={(e) => setCategoryInput(e.target.value)}
+                aria-label="Category"
+                className="w-48 rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 focus:border-slate-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              />
+            </label>
+            <button onClick={saveCategory} className={btnSecondary}>
+              Save category
+            </button>
+          </div>
+          {categoryError !== null && <p className={alertError}>{categoryError}</p>}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <ImagePane label="baseline">
               {snapshot.baselineUrl !== null ? (
@@ -591,7 +661,12 @@ function SnapshotDetail({
                     (() => {
                       const scaleX = overlayRef.current.clientWidth / imgNaturalSize.width;
                       const scaleY = overlayRef.current.clientHeight / imgNaturalSize.height;
-                      const bindings = resolveMaskIds(masks, createdMasks, globalMasks ?? []);
+                      const bindings = resolveMaskIds(
+                        masks,
+                        createdMasks,
+                        globalMasks ?? [],
+                        categoryMasks ?? [],
+                      );
                       return masks.map((rect, i) => {
                         const binding = bindings[i];
                         return (
@@ -703,6 +778,11 @@ function SnapshotDetail({
                 <button onClick={() => createMask("per-image")} className={btnSecondary}>
                   Save as mask for this snapshot
                 </button>
+                {snapshot.category !== null && (
+                  <button onClick={() => createMask("category")} className={btnSecondary}>
+                    Save as mask for this category
+                  </button>
+                )}
                 <button onClick={() => setPendingRect(null)} className={btnGhost}>
                   Cancel
                 </button>

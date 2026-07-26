@@ -7,6 +7,7 @@ export const FORMAT_VERSION = 0;
 export interface Snapshot {
   formatVersion: 0;
   name: string;
+  category?: string;
   viewport: { width: number; height: number };
   html: string;
   stylesheets: { href: string; content: string }[];

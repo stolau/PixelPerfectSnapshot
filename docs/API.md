@@ -22,8 +22,16 @@ work that consumes this contract. All request/response bodies are JSON unless no
 - **Masks** — rectangular regions excluded from the pixel diff. Global masks (created via
   /api/masks) apply to every snapshot; per-image masks (created via a snapshot's /masks
   sub-resource) are keyed by (name, viewport) like baselines — not per run — so they apply to
-  every future run of that same test case. Both kinds combine additively for a given snapshot's
-  compare.
+  every future run of that same test case; category masks (created via /api/categories/<category>
+  /masks) apply to every snapshot tagged with that `category`, regardless of `name` — useful for a
+  recurring same-position element (e.g. a version stamp) that appears across many differently-named
+  snapshots, without repeating a per-image mask on each one. All three kinds combine additively for
+  a given snapshot's compare.
+- **Category** — an optional string tag on a snapshot (`category`, settable at upload or via
+  `PATCH`). Purely a masking-grouping concept — it has no effect on baseline identity, which stays
+  keyed by (name, viewport) exactly as without categories. All snapshots sharing a category must
+  have the same viewport (enforced: tagging a snapshot with a category that's already established a
+  different viewport is rejected with `400`).
 - **Baseline scoping (branch / master / release)** — a run may optionally set `scope` to compare
   against and approve into an isolated baseline set instead of the single global one (master):
   - **master** (default, no `scope`) — today's behavior: one shared baseline per (name, viewport).
@@ -65,9 +73,11 @@ to scope this run — see **Baseline scoping** above. `id` must be non-empty and
 
 ### `POST /api/runs/<run_id>/snapshots`
 Upload one snapshot. Body: a snapshot document, validated against
-[`snapshot.schema.json`](snapshot.schema.json).
+[`snapshot.schema.json`](snapshot.schema.json) — includes an optional `category` field (see
+**Category** above).
 `201` → `{"name": "<name>", "status": "pending"}`
-`400` → `{"error": "<schema violation message>"}` · `404` unknown run · `409` duplicate name in run ·
+`400` → `{"error": "<schema violation message>"}`, or the `category` conflicts with the viewport
+already established for it by another snapshot · `404` unknown run · `409` duplicate name in run ·
 `413` request body exceeds the upload size cap → `{"error": "<message>"}`.
 
 ### `GET /api/runs`
@@ -114,6 +124,7 @@ Upload one snapshot. Body: a snapshot document, validated against
   "name": "checkout-page",
   "viewport": {"width": 1280, "height": 720},
   "status": "pending",
+  "category": null,
   "baselineUrl": null,
   "candidateUrl": null,
   "diffUrl": null
@@ -122,6 +133,14 @@ Upload one snapshot. Body: a snapshot document, validated against
 The three URLs are **server-relative paths** (e.g.
 `/api/runs/run-2/snapshots/checkout-page/images/baseline`) pointing at the image endpoints below
 once the corresponding PNG exists; `null` until then. `404` unknown run or name.
+
+### `PATCH /api/runs/<run_id>/snapshots/<name>`
+Set or clear this snapshot's `category`. Body: `{"category": "<string>"|null}`.
+`200` → `{"name", "category"}`
+`400` → missing `category` key, wrong type, empty string, or the category conflicts with the
+viewport already established for it by another snapshot (this snapshot's own row is excluded from
+that check, so re-saving the same category it already holds is never self-blocked). `404` unknown
+run or name.
 
 ### `GET /api/runs/<run_id>/snapshots/<name>/images/<kind>`
 `kind` ∈ `baseline` | `candidate` | `diff`. `200` → `image/png`. `404` while the image does not
@@ -190,7 +209,8 @@ Delete a global mask.
 
 ### `GET /api/runs/<run_id>/snapshots/<name>/masks`
 List the masks that apply to this snapshot: its own per-image masks (keyed by this snapshot's
-(name, viewport)) plus all global masks, combined.
+(name, viewport)), all global masks, and — when this snapshot has a `category` — that category's
+masks, combined.
 `200`:
 ```json
 {
@@ -213,6 +233,28 @@ to every future run of that same test case, not just this one. Body: same shape 
 ### `DELETE /api/runs/<run_id>/snapshots/<name>/masks/<mask_id>`
 Delete a per-image mask scoped to this snapshot's (name, viewport) key.
 `204` on success · `404` unknown run or name, or `mask_id` not found for this (name, viewport) key.
+
+### `GET /api/categories/<category>/masks`
+List masks scoped to `category` (apply to every snapshot tagged with it, regardless of `name`).
+`200`:
+```json
+{
+  "masks": [
+    {"id": 1, "x": 0, "y": 0, "width": 100, "height": 40}
+  ]
+}
+```
+
+### `POST /api/categories/<category>/masks`
+Create a category mask. Body: same shape as `POST /api/masks`.
+`201` → `{"id", "x", "y", "width", "height"}`
+`400` → missing/invalid field, or the mask falls outside the viewport already established for this
+category by the snapshots tagged with it. `404` → `category` isn't used by any snapshot yet (there
+is no viewport to bounds-check the mask against).
+
+### `DELETE /api/categories/<category>/masks/<mask_id>`
+Delete a category mask.
+`204` on success · `404` unknown mask id for this category.
 
 ## Branches & Releases
 
