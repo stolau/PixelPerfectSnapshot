@@ -436,6 +436,12 @@ function RunDetail({
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [processError, setProcessError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkApproving, setBulkApproving] = useState(false);
+  const [bulkResult, setBulkResult] = useState<{
+    succeeded: string[];
+    failed: { name: string; message: string }[];
+  } | null>(null);
 
   useEffect(() => {
     getRun(runId).then(setRun, (err: Error) => setError(err.message));
@@ -456,6 +462,45 @@ function RunDetail({
       }
     } finally {
       setProcessing(false);
+    }
+  }
+
+  function toggleSelected(name: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) {
+        next.delete(name);
+      } else {
+        next.add(name);
+      }
+      return next;
+    });
+  }
+
+  async function approveSelected() {
+    setBulkResult(null);
+    setBulkApproving(true);
+    const succeeded: string[] = [];
+    const failed: { name: string; message: string }[] = [];
+    try {
+      for (const name of selected) {
+        try {
+          await approveSnapshot(runId, name);
+          succeeded.push(name);
+        } catch (err) {
+          const message =
+            err instanceof ApiError ? `(${err.status}) ${err.message}` : (err as Error).message;
+          failed.push({ name, message });
+        }
+      }
+      const detail = await getRun(runId);
+      setRun(detail);
+      setSelected(new Set());
+      setBulkResult({ succeeded, failed });
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBulkApproving(false);
     }
   }
 
@@ -480,14 +525,42 @@ function RunDetail({
             </div>
           )}
           {processError !== null && <p className={alertError}>{processError}</p>}
+          {selected.size > 0 && (
+            <div>
+              <button onClick={approveSelected} disabled={bulkApproving} className={btnPrimary}>
+                Approve selected ({selected.size})
+              </button>
+            </div>
+          )}
+          {bulkResult !== null && (
+            <div className="flex flex-col gap-1">
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                {bulkResult.succeeded.length} approved
+                {bulkResult.failed.length > 0 ? `, ${bulkResult.failed.length} failed` : ""}
+              </p>
+              {bulkResult.failed.map((f) => (
+                <p key={f.name} className={alertError}>
+                  {f.name}: {f.message}
+                </p>
+              ))}
+            </div>
+          )}
           <ul className="flex flex-col gap-2">
             {run.snapshots.map((snapshot) => {
               const { dot } = statusStyles(snapshot.status);
               return (
-                <li key={snapshot.name}>
+                <li key={snapshot.name} className="flex items-center gap-2">
+                  {snapshot.status === "approved-baseline-missing" && (
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${snapshot.name}`}
+                      checked={selected.has(snapshot.name)}
+                      onChange={() => toggleSelected(snapshot.name)}
+                    />
+                  )}
                   <button
                     onClick={() => onSelectSnapshot(snapshot.name)}
-                    className={`flex w-full items-center gap-3 ${card} px-4 py-3 text-left text-sm text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:shadow dark:text-slate-200 dark:hover:border-slate-700`}
+                    className={`flex flex-1 items-center gap-3 ${card} px-4 py-3 text-left text-sm text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:shadow dark:text-slate-200 dark:hover:border-slate-700`}
                   >
                     <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${dot}`} />
                     {snapshot.name} — {snapshot.viewport.width}x{snapshot.viewport.height} —{" "}
