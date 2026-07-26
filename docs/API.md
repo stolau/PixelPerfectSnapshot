@@ -85,11 +85,14 @@ already established for it by another snapshot · `404` unknown run · `409` dup
 ```json
 {
   "runs": [
-    {"id": "run-2", "createdAt": "2026-07-15T09:30:00Z", "snapshotCount": 3, "status": "fail", "newCount": 1, "removedCount": 0},
-    {"id": "run-1", "createdAt": "2026-07-14T18:00:00Z", "snapshotCount": 1, "status": "pending", "newCount": 0, "removedCount": 2}
+    {"id": "run-2", "createdAt": "2026-07-15T09:30:00Z", "scope": {"kind": "branch", "id": "feature-x"}, "snapshotCount": 3, "status": "fail", "newCount": 1, "removedCount": 0},
+    {"id": "run-1", "createdAt": "2026-07-14T18:00:00Z", "scope": null, "snapshotCount": 1, "status": "pending", "newCount": 0, "removedCount": 2}
   ]
 }
 ```
+- `scope` — `{"kind": "branch"|"release", "id": "<string>"}` if this run was created with a
+  `scope`, else `null` for an unscoped (master) run. Mirrors the `scope` a run was created with —
+  see **Baseline scoping** above.
 - `status` — this run's aggregate verdict: `"fail"` if any snapshot has status `fail`; else
   `"pass"` if the run has at least one snapshot and all of them are `pass`; else `"pending"`
   (covers `pending`, `approved-baseline-missing`, and a run with zero snapshots).
@@ -265,10 +268,26 @@ Delete a category mask.
 
 ## Branches & Releases
 
-See **Baseline scoping** under Concepts. There is deliberately no endpoint to list or delete
-branches in this version — a branch is just whatever `id` string a run's `scope` names, and an
-unused or typo'd branch id simply never accumulates any files. This is a known, accepted
-limitation for now, not an oversight.
+See **Baseline scoping** under Concepts. There is deliberately no endpoint to *delete* a branch in
+this version — a branch is just whatever `id` string a run's `scope` names, and an unused or
+typo'd branch id simply never accumulates any files. This is a known, accepted limitation for now,
+not an oversight.
+
+### `GET /api/branches`
+List distinct branch ids currently in use by any run, sorted.
+`200`:
+```json
+{"branches": ["feature-x", "feature-y"]}
+```
+
+### `GET /api/releases`
+List all releases, newest first.
+`200`:
+```json
+{"releases": [{"id": "v2", "createdAt": "2026-07-20T09:00:00Z"}, {"id": "v1", "createdAt": "2026-07-15T09:00:00Z"}]}
+```
+Only `id`/`createdAt` are available per entry — `seededFrom`/`fileCount` are one-time facts
+returned by `POST /api/releases` at creation time, never persisted as columns.
 
 ### `POST /api/branches/<branch_id>/merge`
 Promote every baseline the branch has approved to master (unconditional — no conflict detection

@@ -144,6 +144,7 @@ def list_runs() -> dict[str, list[dict[str, object]]]:
     db = get_db()
     rows = db.execute(
         "SELECT runs.id AS id, runs.created_at AS created_at,"
+        " runs.scope_kind AS scope_kind, runs.scope_id AS scope_id,"
         " COUNT(snapshots.id) AS snapshot_count,"
         " SUM(CASE WHEN snapshots.status = 'fail' THEN 1 ELSE 0 END) AS fail_count,"
         " SUM(CASE WHEN snapshots.status = 'pass' THEN 1 ELSE 0 END) AS pass_count,"
@@ -170,6 +171,11 @@ def list_runs() -> dict[str, list[dict[str, object]]]:
             {
                 "id": row["id"],
                 "createdAt": row["created_at"],
+                "scope": (
+                    {"kind": row["scope_kind"], "id": row["scope_id"]}
+                    if row["scope_kind"] is not None
+                    else None
+                ),
                 "snapshotCount": row["snapshot_count"],
                 "status": _run_verdict(row["snapshot_count"], row["fail_count"], row["pass_count"]),
                 "newCount": row["new_count"],
@@ -182,6 +188,20 @@ def list_runs() -> dict[str, list[dict[str, object]]]:
             for row in rows
         ]
     }
+
+
+@bp.get("/branches")
+def list_branches() -> dict[str, list[str]]:
+    rows = get_db().execute(
+        "SELECT DISTINCT scope_id FROM runs WHERE scope_kind = 'branch' ORDER BY scope_id"
+    ).fetchall()
+    return {"branches": [row["scope_id"] for row in rows]}
+
+
+@bp.get("/releases")
+def list_releases() -> dict[str, list[dict[str, str]]]:
+    rows = get_db().execute("SELECT id, created_at FROM releases ORDER BY rowid DESC").fetchall()
+    return {"releases": [{"id": row["id"], "createdAt": row["created_at"]} for row in rows]}
 
 
 @bp.post("/releases")

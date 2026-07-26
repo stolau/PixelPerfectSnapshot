@@ -8,18 +8,40 @@ Consumes the backend HTTP API (`docs/API.md`).
 - `index.html` — Vite entry document.
 - `src/main.tsx` — React root bootstrap.
 - `src/App.tsx` — application root: a persistent `NavBar` (logo placeholder + app name, click to
-  return to the run list; a "Settings" link, highlighted when active) plus four state-based views
-  — run list → run detail → snapshot detail → a standalone `Settings` view holding `AuthTokenInput`
-  (shows the currently stored auth token, if any, in a password field with "Save token" / "Clear
-  token" buttons wired to `setAuthToken()`) and `ImageSizeInput` (Small/Medium/Large buttons wired
-  to `imageDisplaySize.ts`'s `setImageSize()`). Run list rows show a color-coded verdict pill
-  (`statusStyles()`, shared with the snapshot-status pill — `fail`/`pass`/`pending`, computed
-  server-side by `GET /api/runs`), a client-computed sequential `Run #N` (oldest run is #1, purely
-  a display number, never persisted), a human-readable `formatRunDate()` timestamp
-  (`Intl.DateTimeFormat`, fixed to UTC since `createdAt` is always `Z`-suffixed), and a muted "+N
-  new, -N missing" summary from the API's `newCount`/`removedCount` (hidden when both are zero).
-  Run detail shows a "Process pending" button when any snapshot is pending, which POSTs `/process`
+  return to the run list; "Branches & Releases" and "Settings" links, each highlighted when
+  active) plus state-based views — run list → run detail → snapshot detail, a standalone
+  `Settings` view holding `AuthTokenInput` (shows the currently stored auth token, if any, in a
+  password field with "Save token" / "Clear token" buttons wired to `setAuthToken()`) and
+  `ImageSizeInput` (Small/Medium/Large buttons wired to `imageDisplaySize.ts`'s `setImageSize()`),
+  and a `ScopesView` (see below). Run list rows show a color-coded verdict pill (`statusStyles()`,
+  shared with the snapshot-status pill — `fail`/`pass`/`pending`, computed server-side by
+  `GET /api/runs`), a client-computed sequential `Run #N` (oldest run is #1 **across the full
+  unfiltered run list, computed before any scope filtering** — see `ScopesView` below — purely a
+  display number, never persisted), a human-readable `formatRunDate()` timestamp
+  (`Intl.DateTimeFormat`, fixed to UTC since `createdAt` is always `Z`-suffixed), a scope tag
+  (`"branch: <id>"` / `"release: <id>"`, only rendered when `run.scope !== null` — master runs get
+  no tag, matching their unlabeled appearance before scope existed at all), and a muted "+N new,
+  -N missing" summary from the API's `newCount`/`removedCount` (hidden when both are zero). Run
+  detail shows a "Process pending" button when any snapshot is pending, which POSTs `/process`
   then refetches the run before repainting statuses.
+
+  **`ScopesView`** — reached via the NavBar link — mirrors `SettingsView`'s two-card-section
+  layout: a "Branches" card (one button per `listBranches()` entry) and a "Releases" card (one
+  button per `listReleases()` entry, showing `formatRunDate(createdAt)`), each with an empty
+  state. Clicking either navigates `RunList` with a `filter: {kind, id}` — **client-side**
+  filtering of the same full, unpaginated `listRuns()` result the unfiltered run list already
+  fetches (this app has no run-list pagination anywhere, so a second backend filtering code path
+  for a filter one `.filter()` call already does would be needless surface). `RunList` computes
+  each run's `buildNumber` from the *full* fetched array first, then filters for display — a
+  branch/release's runs keep their true global build number, not a renumbered ordinal local to the
+  filtered subset. A filtered `RunList` shows a "Branch: <id>" / "Release: <id>" heading and a
+  "Back" button (to `ScopesView`); the `filter` (and, deeper in, the originating `runId`/`name`)
+  thread through `run` → `snapshot` view navigation so "Back" from a snapshot two levels deep
+  returns to the *filtered* run list it came from, not the unfiltered one. Read-only by design —
+  no merge-to-master or cut-release actions from the viewer; those stay curl/CI-only, and once a
+  scoped run is open, baseline resolution for its images is already fully transparent server-side
+  (`scoped_baseline_read_path()`), so `RunDetail`/`SnapshotDetail` needed zero changes to work
+  correctly for scoped runs — this feature is purely about *getting to* the right runs.
 
   **Snapshot detail** shows an inline-editable "Category" text field (empty string ↔ `null`) next
   to the status pill; "Save category" PATCHes it via `updateSnapshotCategory()` and updates local
@@ -100,9 +122,11 @@ Consumes the backend HTTP API (`docs/API.md`).
   instead of failing silently; a `401` specifically points at the auth token input above.
 - `src/api.ts` — typed client for the backend HTTP API (`docs/API.md`). Prefixes requests with
   `VITE_API_BASE` (empty by default; dev server proxies `/api` to `http://localhost:5000`).
-  `RunSummary` includes `status` (`RunStatus` = `"pass" | "fail" | "pending"`), `newCount`, and
-  `removedCount` alongside `id`/`createdAt`/`snapshotCount` — all computed server-side by
-  `GET /api/runs`.
+  `RunSummary` includes `status` (`RunStatus` = `"pass" | "fail" | "pending"`), `scope`
+  (`RunScope = {kind: "branch" | "release"; id: string} | null`), `newCount`, and `removedCount`
+  alongside `id`/`createdAt`/`snapshotCount` — all computed server-side by `GET /api/runs`.
+  `listBranches()` (`GET /api/branches`) and `listReleases()` (`GET /api/releases`, returning
+  `ReleaseSummary[]` — `{id, createdAt}`) back `ScopesView`.
   Also exports `imageUrl(path)`, which applies the same `VITE_API_BASE` prefix to image srcs, and
   `getSnapshotHistory(id, name)` / `historyImageUrl(id, name, timestamp)` for the history list and
   its per-entry image URLs. `SnapshotDetail` includes `category: string | null`;

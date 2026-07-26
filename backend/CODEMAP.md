@@ -24,12 +24,18 @@ approved baselines. HTTP contract: `docs/API.md`. Upload payload contract:
   `release` else 400; `id` validated via `_validate_scope_id()` else 400; `kind: "release"` must
   name an existing row in `releases` else 404 "release not found"; `scope_kind`/`scope_id` are
   stored on the run but never appear in the response body),
-  `GET /api/runs` (each row also carries `status` — aggregate verdict via `_run_verdict()`: `fail`
-  if any snapshot failed, else `pass` if the run has ≥1 snapshot and all passed, else `pending`
-  (covers pending/approved-baseline-missing/zero-snapshot); `newCount` — this run's own snapshots
-  with status `approved-baseline-missing`; `removedCount` — master `approved_baselines` keys not
-  covered by this run's own snapshots, always MASTER-only regardless of the run's own scope, and
-  not updated by branch-merge promotions — see `docs/API.md`),
+  `GET /api/runs` (each row also carries `scope` — `{"kind", "id"}` mirroring the run's own
+  `scope_kind`/`scope_id`, or `null` for master; `status` — aggregate verdict via
+  `_run_verdict()`: `fail` if any snapshot failed, else `pass` if the run has ≥1 snapshot and all
+  passed, else `pending` (covers pending/approved-baseline-missing/zero-snapshot); `newCount` —
+  this run's own snapshots with status `approved-baseline-missing`; `removedCount` — master
+  `approved_baselines` keys not covered by this run's own snapshots, always MASTER-only regardless
+  of the run's own scope, and not updated by branch-merge promotions — see `docs/API.md`),
+  `GET /api/branches` (distinct `scope_id` values in use with `scope_kind = 'branch'`, sorted —
+  the same "derive from what's in use, no dedicated table" trick `GET /api/categories` uses),
+  `GET /api/releases` (`id`/`createdAt` per row from the `releases` table, newest first —
+  `seededFrom`/`fileCount` from `POST /api/releases`'s response are one-time facts, never
+  persisted as columns, so they can't appear here),
   `GET /api/runs/<run_id>`, `POST /api/runs/<run_id>/snapshots` (schema-validated; optional
   `category` field — if given, rejected with 400 when it conflicts with the viewport already
   established for that category by another snapshot, checked+inserted inside an explicit `BEGIN
