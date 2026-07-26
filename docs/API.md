@@ -234,6 +234,13 @@ to every future run of that same test case, not just this one. Body: same shape 
 Delete a per-image mask scoped to this snapshot's (name, viewport) key.
 `204` on success · `404` unknown run or name, or `mask_id` not found for this (name, viewport) key.
 
+### `GET /api/categories`
+List distinct category names currently in use by any snapshot, sorted.
+`200`:
+```json
+{"categories": ["App Shell", "Checkout Flow"]}
+```
+
 ### `GET /api/categories/<category>/masks`
 List masks scoped to `category` (apply to every snapshot tagged with it, regardless of `name`).
 `200`:

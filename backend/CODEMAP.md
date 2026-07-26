@@ -76,6 +76,8 @@ approved baselines. HTTP contract: `docs/API.md`. Upload payload contract:
   400 if the mask exceeds the resolved snapshot's viewport bounds; 404 unknown run or name),
   `DELETE /api/runs/<run_id>/snapshots/<name>/masks/<mask_id>` (scoped delete by (name, viewport);
   404 unknown run/name or mask id not in that scope),
+  `GET /api/categories` (distinct category names currently in use by any snapshot, sorted — the
+  viewer's mask-assignment menu uses this to list existing categories to pick from),
   `GET /api/categories/<category>/masks` / `POST /api/categories/<category>/masks` /
   `DELETE /api/categories/<category>/masks/<mask_id>` (mask categories — a third scope, alongside
   global and per-image: a mask saved against a category applies to every snapshot tagged with that

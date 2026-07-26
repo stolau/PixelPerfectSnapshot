@@ -9,43 +9,79 @@ Consumes the backend HTTP API (`docs/API.md`).
 - `src/main.tsx` — React root bootstrap.
 - `src/App.tsx` — application root: a persistent `NavBar` (logo placeholder + app name, click to
   return to the run list; a "Settings" link, highlighted when active) plus four state-based views
-  — run list → run detail → snapshot detail (baseline/candidate/diff side by side, approve button;
-  refetches the snapshot after a successful approve so the status stays fresh) and a standalone
-  `Settings` view holding `AuthTokenInput` (shows the currently stored auth token, if any, in a
-  password field with "Save token" / "Clear token" buttons wired to `setAuthToken()`). Run list
-  rows show a color-coded verdict pill (`statusStyles()`, shared with the snapshot-status pill —
-  `fail`/`pass`/`pending`, computed server-side by `GET /api/runs`), a client-computed sequential
-  `Run #N` (oldest run is #1, purely a display number, never persisted), a human-readable
-  `formatRunDate()` timestamp (`Intl.DateTimeFormat`, fixed to UTC since `createdAt` is always
-  `Z`-suffixed), and a muted "+N new, -N missing" summary from the API's `newCount`/`removedCount`
-  (hidden when both are zero). Snapshot detail also
-  shows a "History" section (thumbnails of prior baselines, newest-first), fetched on mount and
-  refetched after a successful approve. Run detail shows a "Process pending" button when any
-  snapshot is pending, which POSTs `/process` then refetches the run (same pattern as approve's
-  post-action refetch) before repainting statuses. Snapshot detail shows an inline-editable
-  "Category" text field (empty string ↔ `null`) next to the status pill; "Save category" PATCHes
-  it via `updateSnapshotCategory()` and updates local state directly (no refetch). Snapshot
-  detail's candidate image (when available) is wrapped in a "Masks" overlay: it fetches this
-  snapshot's combined masks (global + per-image +, when the snapshot has a category, that
-  category's masks — all three layers already unioned server-side by `applicable_masks()`), the
-  global mask list, and — only when the snapshot has a `category` — that category's mask list, all
-  on mount (the category-mask fetch is a separate effect keyed on `snapshot?.category` since the
-  category isn't known until the snapshot itself has loaded). It renders each applicable mask as a
-  semi-transparent rect scaled to the displayed image size, and lets you drag a new rectangle on
-  the image to open a scope picker — "Save as global mask" / "Save as mask for this snapshot", plus
-  "Save as mask for this category" when the open snapshot has a category set (a `<h2>Masks</h2>`
-  section below History holds that picker and any mask error). Delete is available only for masks
-  whose id can be proven: global and category masks (cross-referenced against `GET /api/masks` /
-  `GET /api/categories/<category>/masks`) and masks created in the current browser session
-  (tracked client-side from their create response, deduplicated by identity against refetched
-  global/category masks to avoid double-binding when duplicate-rect masks exist). Pre-existing
-  per-image masks — fetched only via the id-less combined endpoint and not created this session —
-  have no delete button, because no endpoint lists per-image masks together with their ids. This is
-  a known limitation of the current (frozen) API surface, not a bug. `resolveMaskIds()` takes all
-  three id-bearing pools (session-created, global, category) and binds each rendered rect to a
-  `{scope, id}` by identity, where `scope` is now `"global" | "per-image" | "category"`. All four
-  `<img>` sites (baseline, candidate, diff, history thumbnails) render through
-  `AuthenticatedImage` (see below) rather than plain `<img>`.
+  — run list → run detail → snapshot detail → a standalone `Settings` view holding `AuthTokenInput`
+  (shows the currently stored auth token, if any, in a password field with "Save token" / "Clear
+  token" buttons wired to `setAuthToken()`) and `ImageSizeInput` (Small/Medium/Large buttons wired
+  to `imageDisplaySize.ts`'s `setImageSize()`). Run list rows show a color-coded verdict pill
+  (`statusStyles()`, shared with the snapshot-status pill — `fail`/`pass`/`pending`, computed
+  server-side by `GET /api/runs`), a client-computed sequential `Run #N` (oldest run is #1, purely
+  a display number, never persisted), a human-readable `formatRunDate()` timestamp
+  (`Intl.DateTimeFormat`, fixed to UTC since `createdAt` is always `Z`-suffixed), and a muted "+N
+  new, -N missing" summary from the API's `newCount`/`removedCount` (hidden when both are zero).
+  Run detail shows a "Process pending" button when any snapshot is pending, which POSTs `/process`
+  then refetches the run before repainting statuses.
+
+  **Snapshot detail** shows an inline-editable "Category" text field (empty string ↔ `null`) next
+  to the status pill; "Save category" PATCHes it via `updateSnapshotCategory()` and updates local
+  state directly (no refetch). A "History" section (thumbnails of prior baselines, newest-first) is
+  fetched on mount and refetched after a successful approve, which itself refetches the snapshot
+  detail so status stays fresh.
+
+  Image display is **Dual** (baseline + candidate/diff side by side, the default) or **Single**
+  (one pane at a time via Baseline/Candidate tabs) — a "Show diff" checkbox swaps whichever pane is
+  in the "candidate slot" between `candidateUrl` and `diffUrl` (an image *swap*, not an
+  alpha-blended overlay, since the backend's diff PNG is opaque, not a transparency mask; see
+  `docs/API.md`). Both baseline and candidate/diff panes render at one shared width
+  (`imageDisplaySize.ts`'s `getImageSize()`/`imageSizePx()`, read once on mount — views fully
+  remount on navigation, so no live cross-view sync is needed) regardless of the snapshot's own
+  captured viewport, via a `style={{width}}` on the `<img>` (not `max-w-full`, which used to make
+  differently-sized snapshots render at different display sizes).
+
+  The interactive (candidate-slot) pane is `InteractiveImagePane` — a presentational component
+  (owns no state; `SnapshotDetail` owns all of `overlayRef`/`drawStart`/`drawCurrent`/`pendingRect`/
+  `imgNaturalSize` and passes them down as props) rendering the drag-to-draw overlay, the resolved
+  mask rects (scaled from `imgNaturalSize` against `overlayRef.current.clientWidth/Height`, which
+  is why `imgNaturalSize` has to flow back down as a prop, not just up via `onImageLoad` — the
+  scaling math runs wherever `overlayRef` lives), and their delete buttons. It's reused unchanged
+  whether the pane is showing `candidate.png` or `diff.png` — both are rendered by the backend at
+  identical pixel dimensions, so the same natural-to-displayed scale factors apply either way; no
+  special-casing needed. Category-scope mask rects get their category's `categoryColor()` border/
+  background instead of the default red; global/per-image masks are unaffected.
+
+  Drawing a rect opens `MaskAssignmentMenu` (also presentational, with its own local
+  `newCategoryInput`/`showNewCategoryField` state — pure UI-input state scoped to the menu's own
+  lifetime, unlike `pendingRect`) offering Global / This snapshot / one button per existing
+  category (fetched via `listCategories()` when the menu opens, each with a `categoryColor()` dot)
+  / "+ New category" (inline name field). Picking an existing category or creating a new one both
+  route through `applyCategory()`, which — before creating the mask — PATCHes the snapshot's own
+  `category` to match if it doesn't already (via `updateSnapshotCategory`), since
+  `applicable_masks()` on the backend resolves category masks by *the snapshot's own* `category`
+  field: a mask created for a category this snapshot isn't tagged with wouldn't apply to it at all,
+  and tagging first is what establishes a brand-new category's viewport so the mask-create's bounds
+  check can succeed. This two-call sequence isn't atomic (a failed second call after a successful
+  tag leaves the snapshot tagged with no mask yet) — a known, accepted, recoverable gap, not an
+  oversight.
+
+  Delete is available only for masks whose id can be proven: global and category masks
+  (cross-referenced against `GET /api/masks` / `GET /api/categories/<category>/masks`) and masks
+  created in the current browser session (tracked client-side from their create response,
+  deduplicated by identity against refetched global/category masks to avoid double-binding when
+  duplicate-rect masks exist). Pre-existing per-image masks — fetched only via the id-less combined
+  endpoint and not created this session — have no delete button, because no endpoint lists
+  per-image masks together with their ids. This is a known limitation of the current (frozen) API
+  surface, not a bug. `resolveMaskIds()` takes all three id-bearing pools (session-created, global,
+  category) and binds each rendered rect to a `{scope, id}` by identity, where `scope` is
+  `"global" | "per-image" | "category"`. All `<img>` sites (baseline, candidate/diff, history
+  thumbnails) render through `AuthenticatedImage` (see below) rather than plain `<img>`.
+- `src/categoryColor.ts` — `categoryColor(name)`: a deterministic string hash into a fixed
+  8-color Tailwind palette (`{border, bg, dot}` classes). Pure and client-only — colors are never
+  stored server-side, so no schema/API surface exists for them; the same category name always
+  produces the same color on any client, without a database round-trip.
+- `src/imageDisplaySize.ts` — `ImageSize = "small" | "medium" | "large"`, a fixed
+  `{small: 240, medium: 400, large: 640}` px-width table (`imageSizePx()`), and
+  `getImageSize()`/`setImageSize()`. Deliberately **localStorage**-backed, unlike `authToken.ts`'s
+  `sessionStorage` — a display-size preference should persist across sessions, unlike a
+  security-sensitive credential, so this is a considered divergence, not an inconsistency.
 - `src/authToken.ts` — sessionStorage-backed auth token: `getAuthToken()` / `setAuthToken(token)`
   (removes the key on `null`/`""`), and `authHeaders()`, which returns `{ Authorization: "Bearer
   <token>" }` when a token is stored or `{}` otherwise. This is the single place
@@ -70,21 +106,25 @@ Consumes the backend HTTP API (`docs/API.md`).
   Also exports `imageUrl(path)`, which applies the same `VITE_API_BASE` prefix to image srcs, and
   `getSnapshotHistory(id, name)` / `historyImageUrl(id, name, timestamp)` for the history list and
   its per-entry image URLs. `SnapshotDetail` includes `category: string | null`;
-  `updateSnapshotCategory(id, name, category)` PATCHes it. Mask CRUD: `Mask` (has `id`) and
-  `MaskRect` (no `id`, the shape returned by the combined per-snapshot masks endpoint) types, plus
-  `listGlobalMasks()` / `createGlobalMask(rect)` / `deleteGlobalMask(id)` for global masks,
-  `listSnapshotMasks(id, name)` / `createSnapshotMask(id, name, rect)` / `deleteSnapshotMask(id,
-  name, maskId)` for per-image masks, and `listCategoryMasks(category)` /
-  `createCategoryMask(category, rect)` / `deleteCategoryMask(category, id)` for category masks
-  (category is `encodeURIComponent`-escaped into the URL path, so categories containing spaces or
-  other reserved characters work). `request<T>()` treats a `204` response as success with no body
+  `updateSnapshotCategory(id, name, category)` PATCHes it; `listCategories()` lists all distinct
+  category names currently in use (`GET /api/categories`), for the mask-assignment menu. Mask
+  CRUD: `Mask` (has `id`) and `MaskRect` (no `id`, the shape returned by the combined per-snapshot
+  masks endpoint) types, plus `listGlobalMasks()` / `createGlobalMask(rect)` /
+  `deleteGlobalMask(id)` for global masks, `listSnapshotMasks(id, name)` / `createSnapshotMask(id,
+  name, rect)` / `deleteSnapshotMask(id, name, maskId)` for per-image masks, and
+  `listCategoryMasks(category)` / `createCategoryMask(category, rect)` /
+  `deleteCategoryMask(category, id)` for category masks (category is `encodeURIComponent`-escaped
+  into the URL path, so categories containing spaces or other reserved characters work).
+  `request<T>()` treats a `204` response as success with no body
   (does not call `.json()`), which the delete-mask endpoints rely on. `request<T>()` merges
   `authHeaders()` into whatever headers the call already sends (e.g. `Content-Type` on mask
   creates), so it's a no-op when no token is stored.
 - `src/fixtures/` — contract-verbatim API response fixtures used by tests.
 - `src/test-setup.ts` — vitest `setupFiles` entry: stubs `URL.createObjectURL`/`revokeObjectURL`
   (unimplemented in jsdom), which `AuthenticatedImage` needs in every test.
-- `src/*.test.tsx` — vitest (+ @testing-library/react, jsdom) tests.
+- `src/*.test.tsx` — vitest (+ @testing-library/react, jsdom) tests. `src/categoryColor.test.ts`
+  and `src/imageDisplaySize.test.ts` are plain vitest unit tests (no React) for those two
+  standalone modules.
 
 ## Commands
 

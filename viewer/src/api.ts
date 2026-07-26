@@ -200,6 +200,11 @@ export function deleteSnapshotMask(runId: string, name: string, id: number): Pro
   );
 }
 
+export async function listCategories(): Promise<string[]> {
+  const body = await request<{ categories: string[] }>("/api/categories");
+  return body.categories;
+}
+
 export async function listCategoryMasks(category: string): Promise<Mask[]> {
   const body = await request<{ masks: Mask[] }>(
     `/api/categories/${encodeURIComponent(category)}/masks`,

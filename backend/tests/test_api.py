@@ -555,6 +555,28 @@ def test_upload_snapshot_with_category(client):
     assert response.get_json()["category"] == CATEGORY
 
 
+def test_list_categories_empty(client):
+    response = client.get("/api/categories")
+    assert response.status_code == 200
+    assert response.get_json() == {"categories": []}
+
+
+def test_list_categories_distinct_and_sorted(client):
+    example = load_example()
+    run_1 = create_run(client)
+    upload_snapshot(client, run_1, dict(example, category="Zeta"))
+    run_2 = create_run(client)
+    upload_snapshot(client, run_2, dict(example, name="other-page", category="Alpha"))
+    run_3 = create_run(client)
+    upload_snapshot(client, run_3, dict(example, name="third-page", category="Zeta"))
+    run_4 = create_run(client)
+    upload_snapshot(client, run_4, dict(example, name="fourth-page"))  # no category
+
+    response = client.get("/api/categories")
+    assert response.status_code == 200
+    assert response.get_json() == {"categories": ["Alpha", "Zeta"]}
+
+
 def test_upload_snapshot_category_viewport_conflict_400(client):
     example = load_example()  # viewport 1280x720
     run_1 = create_run(client)

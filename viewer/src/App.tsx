@@ -13,6 +13,7 @@ import {
   getSnapshotHistory,
   historyImageUrl,
   imageUrl,
+  listCategories,
   listCategoryMasks,
   listGlobalMasks,
   listRuns,
@@ -30,6 +31,9 @@ import type {
 } from "./api.js";
 import { AuthenticatedImage } from "./AuthenticatedImage.js";
 import { getAuthToken, setAuthToken } from "./authToken.js";
+import { categoryColor } from "./categoryColor.js";
+import { getImageSize, imageSizePx, setImageSize } from "./imageDisplaySize.js";
+import type { ImageSize } from "./imageDisplaySize.js";
 
 type View =
   | { kind: "runs" }
@@ -158,6 +162,40 @@ function SettingsView() {
         </p>
         <AuthTokenInput />
       </section>
+      <section className={`${card} flex flex-col gap-3 p-4`}>
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          Image display size
+        </h3>
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          One shared size for every baseline/candidate/diff image, regardless of each snapshot's
+          own captured viewport.
+        </p>
+        <ImageSizeInput />
+      </section>
+    </div>
+  );
+}
+
+function ImageSizeInput() {
+  const [size, setSize] = useState<ImageSize>(() => getImageSize());
+
+  function choose(next: ImageSize) {
+    setImageSize(next);
+    setSize(next);
+  }
+
+  return (
+    <div className="flex gap-2">
+      {(["small", "medium", "large"] as const).map((option) => (
+        <button
+          key={option}
+          onClick={() => choose(option)}
+          aria-pressed={size === option}
+          className={size === option ? btnPrimary : btnSecondary}
+        >
+          {option[0].toUpperCase() + option.slice(1)}
+        </button>
+      ))}
     </div>
   );
 }
@@ -381,6 +419,194 @@ function ImagePane({
   );
 }
 
+function MaskAssignmentMenu({
+  existingCategories,
+  onSelectGlobal,
+  onSelectSnapshot,
+  onSelectCategory,
+  onCreateCategory,
+  onCancel,
+}: {
+  existingCategories: string[];
+  onSelectGlobal: () => void;
+  onSelectSnapshot: () => void;
+  onSelectCategory: (category: string) => void;
+  onCreateCategory: (category: string) => void;
+  onCancel: () => void;
+}) {
+  const [newCategoryInput, setNewCategoryInput] = useState("");
+  const [showNewCategoryField, setShowNewCategoryField] = useState(false);
+
+  return (
+    <div
+      data-testid="mask-scope-picker"
+      className={`flex w-fit flex-wrap items-center gap-2 ${card} px-3 py-2`}
+    >
+      <button onClick={onSelectGlobal} className={btnSecondary}>
+        Save as global mask
+      </button>
+      <button onClick={onSelectSnapshot} className={btnSecondary}>
+        Save as mask for this snapshot
+      </button>
+      {existingCategories.length > 0 && (
+        <span className="h-5 w-px bg-slate-300 dark:bg-slate-700" />
+      )}
+      {existingCategories.map((name) => {
+        const color = categoryColor(name);
+        return (
+          <button key={name} onClick={() => onSelectCategory(name)} className={btnSecondary}>
+            <span className={`mr-1.5 inline-block h-2 w-2 rounded-full ${color.dot}`} />
+            {name}
+          </button>
+        );
+      })}
+      {showNewCategoryField ? (
+        <span className="flex items-center gap-1">
+          <input
+            type="text"
+            value={newCategoryInput}
+            onChange={(e) => setNewCategoryInput(e.target.value)}
+            aria-label="New category name"
+            className="w-36 rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 focus:border-slate-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+          />
+          <button
+            onClick={() => onCreateCategory(newCategoryInput.trim())}
+            disabled={newCategoryInput.trim() === ""}
+            className={btnSecondary}
+          >
+            Create &amp; apply
+          </button>
+        </span>
+      ) : (
+        <button onClick={() => setShowNewCategoryField(true)} className={btnSecondary}>
+          + New category
+        </button>
+      )}
+      <button onClick={onCancel} className={btnGhost}>
+        Cancel
+      </button>
+    </div>
+  );
+}
+
+function InteractiveImagePane({
+  src,
+  alt,
+  widthPx,
+  overlayRef,
+  onMouseDown,
+  onMouseMove,
+  onMouseUp,
+  onImageLoad,
+  imgNaturalSize,
+  masks,
+  createdMasks,
+  globalMasks,
+  categoryMasks,
+  category,
+  drawStart,
+  drawCurrent,
+  onDeleteMask,
+}: {
+  src: string;
+  alt: string;
+  widthPx: number;
+  overlayRef: React.RefObject<HTMLDivElement>;
+  onMouseDown: (e: React.MouseEvent<HTMLDivElement>) => void;
+  onMouseMove: (e: React.MouseEvent<HTMLDivElement>) => void;
+  onMouseUp: () => void;
+  onImageLoad: (size: { width: number; height: number }) => void;
+  imgNaturalSize: { width: number; height: number } | null;
+  masks: MaskRect[] | null;
+  createdMasks: {
+    scope: MaskScope;
+    id: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }[];
+  globalMasks: Mask[];
+  categoryMasks: Mask[];
+  category: string | null;
+  drawStart: { x: number; y: number } | null;
+  drawCurrent: { x: number; y: number } | null;
+  onDeleteMask: (scope: MaskScope, id: number) => void;
+}) {
+  return (
+    <div
+      ref={overlayRef}
+      data-testid="mask-overlay"
+      className="relative inline-block select-none rounded-md bg-slate-100 dark:bg-slate-800"
+      onMouseDown={onMouseDown}
+      onMouseMove={onMouseMove}
+      onMouseUp={onMouseUp}
+    >
+      <AuthenticatedImage
+        src={src}
+        alt={alt}
+        draggable={false}
+        style={{ width: widthPx }}
+        className="mx-auto h-auto rounded"
+        onLoad={(e) => {
+          const img = e.currentTarget;
+          onImageLoad({ width: img.naturalWidth, height: img.naturalHeight });
+        }}
+      />
+      {masks !== null &&
+        imgNaturalSize !== null &&
+        overlayRef.current !== null &&
+        (() => {
+          const scaleX = overlayRef.current.clientWidth / imgNaturalSize.width;
+          const scaleY = overlayRef.current.clientHeight / imgNaturalSize.height;
+          const bindings = resolveMaskIds(masks, createdMasks, globalMasks, categoryMasks);
+          return masks.map((rect, i) => {
+            const binding = bindings[i];
+            const color =
+              binding !== null && binding.scope === "category" && category !== null
+                ? categoryColor(category)
+                : null;
+            return (
+              <div
+                key={i}
+                data-testid="mask-rect"
+                className={`absolute box-border border-2 ${color?.border ?? "border-red-500"} ${color?.bg ?? "bg-red-500/30"}`}
+                style={{
+                  left: rect.x * scaleX,
+                  top: rect.y * scaleY,
+                  width: rect.width * scaleX,
+                  height: rect.height * scaleY,
+                }}
+              >
+                {binding !== null && (
+                  <button
+                    data-testid={`mask-delete-${binding.scope}-${binding.id}`}
+                    aria-label="Delete mask"
+                    onClick={() => onDeleteMask(binding.scope, binding.id)}
+                    className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-xs font-bold leading-none text-white shadow hover:bg-red-700"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            );
+          });
+        })()}
+      {drawStart !== null && drawCurrent !== null && (
+        <div
+          className="pointer-events-none absolute border-2 border-dashed border-blue-500"
+          style={{
+            left: Math.min(drawStart.x, drawCurrent.x),
+            top: Math.min(drawStart.y, drawCurrent.y),
+            width: Math.abs(drawCurrent.x - drawStart.x),
+            height: Math.abs(drawCurrent.y - drawStart.y),
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 function SnapshotDetail({
   runId,
   name,
@@ -415,6 +641,11 @@ function SnapshotDetail({
   const [imgNaturalSize, setImgNaturalSize] = useState<{ width: number; height: number } | null>(
     null,
   );
+  const [existingCategories, setExistingCategories] = useState<string[] | null>(null);
+  const [viewMode, setViewMode] = useState<"dual" | "single">("dual");
+  const [showDiff, setShowDiff] = useState(false);
+  const [singleTab, setSingleTab] = useState<"baseline" | "candidate">("candidate");
+  const [imageWidthPx] = useState(() => imageSizePx(getImageSize()));
   const overlayRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -450,39 +681,71 @@ function SnapshotDetail({
     listCategoryMasks(category).then(setCategoryMasks, (err: Error) => setMasksError(err.message));
   }, [snapshot?.category]);
 
-  async function refetchMasks(scope: MaskScope) {
+  useEffect(() => {
+    if (pendingRect === null) {
+      setExistingCategories(null);
+      return;
+    }
+    listCategories().then(setExistingCategories, (err: Error) => setMasksError(err.message));
+  }, [pendingRect !== null]);
+
+  async function refetchMasks(scope: MaskScope, category?: string) {
     try {
       const snapshotMasks = await listSnapshotMasks(runId, name);
       setMasks(snapshotMasks);
       if (scope === "global") {
         const global = await listGlobalMasks();
         setGlobalMasks(global);
-      } else if (scope === "category" && snapshot?.category != null) {
-        const category = await listCategoryMasks(snapshot.category);
-        setCategoryMasks(category);
+      } else if (scope === "category" && category != null) {
+        const list = await listCategoryMasks(category);
+        setCategoryMasks(list);
       }
     } catch (err) {
       setMasksError((err as Error).message);
     }
   }
 
-  async function createMask(scope: MaskScope) {
+  async function createMask(scope: "global" | "per-image") {
     if (pendingRect === null) return;
-    const category = snapshot?.category ?? null;
-    if (scope === "category" && category === null) return;
     setMasksError(null);
     try {
-      let response: Mask;
-      if (scope === "global") {
-        response = await createGlobalMask(pendingRect);
-      } else if (scope === "per-image") {
-        response = await createSnapshotMask(runId, name, pendingRect);
-      } else {
-        response = await createCategoryMask(category!, pendingRect);
-      }
+      const response =
+        scope === "global"
+          ? await createGlobalMask(pendingRect)
+          : await createSnapshotMask(runId, name, pendingRect);
       setCreatedMasks((prev) => [...prev, { scope, ...response }]);
       setPendingRect(null);
       await refetchMasks(scope);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setMasksError(`Create mask failed (${err.status}): ${err.message}`);
+      } else {
+        setMasksError(`Create mask failed: ${(err as Error).message}`);
+      }
+      setPendingRect(null);
+    }
+  }
+
+  /**
+   * Picking a category (existing or new) also tags the current snapshot with it, not just
+   * creates the mask: applicable_masks() resolves category masks by the snapshot's own
+   * `category`, so a mask created for a category this snapshot isn't tagged with wouldn't
+   * apply here at all — and tagging first is what establishes the viewport for a brand-new
+   * category, since the backend bounds-checks a category mask against it.
+   */
+  async function applyCategory(category: string) {
+    if (pendingRect === null) return;
+    setMasksError(null);
+    try {
+      if (snapshot !== null && snapshot.category !== category) {
+        await updateSnapshotCategory(runId, name, category);
+        setSnapshot((prev) => (prev !== null ? { ...prev, category } : prev));
+        setCategoryInput(category);
+      }
+      const response = await createCategoryMask(category, pendingRect);
+      setCreatedMasks((prev) => [...prev, { scope: "category", ...response }]);
+      setPendingRect(null);
+      await refetchMasks("category", category);
     } catch (err) {
       if (err instanceof ApiError) {
         setMasksError(`Create mask failed (${err.status}): ${err.message}`);
@@ -506,7 +769,7 @@ function SnapshotDetail({
         await deleteCategoryMask(category!, id);
       }
       setCreatedMasks((prev) => prev.filter((m) => !(m.scope === scope && m.id === id)));
-      await refetchMasks(scope);
+      await refetchMasks(scope, category ?? undefined);
     } catch (err) {
       if (err instanceof ApiError) {
         setMasksError(`Delete mask failed (${err.status}): ${err.message}`);
@@ -619,116 +882,130 @@ function SnapshotDetail({
             </button>
           </div>
           {categoryError !== null && <p className={alertError}>{categoryError}</p>}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <ImagePane label="baseline">
-              {snapshot.baselineUrl !== null ? (
-                <div className="rounded-md bg-slate-100 p-2 dark:bg-slate-800">
-                  <AuthenticatedImage
-                    src={imageUrl(snapshot.baselineUrl)}
-                    alt="baseline"
-                    className="mx-auto h-auto max-w-full rounded"
-                  />
-                </div>
-              ) : (
-                <div className="flex h-32 items-center justify-center text-sm text-slate-400">
-                  not available
-                </div>
-              )}
-            </ImagePane>
-            <ImagePane label="candidate">
-              {snapshot.candidateUrl !== null ? (
-                <div
-                  ref={overlayRef}
-                  data-testid="mask-overlay"
-                  className="relative inline-block select-none rounded-md bg-slate-100 dark:bg-slate-800"
-                  onMouseDown={handleMouseDown}
-                  onMouseMove={handleMouseMove}
-                  onMouseUp={handleMouseUp}
-                >
-                  <AuthenticatedImage
-                    src={imageUrl(snapshot.candidateUrl)}
-                    alt="candidate"
-                    draggable={false}
-                    className="mx-auto h-auto max-w-full rounded"
-                    onLoad={(e) => {
-                      const img = e.currentTarget;
-                      setImgNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
-                    }}
-                  />
-                  {masks !== null &&
-                    imgNaturalSize !== null &&
-                    overlayRef.current !== null &&
-                    (() => {
-                      const scaleX = overlayRef.current.clientWidth / imgNaturalSize.width;
-                      const scaleY = overlayRef.current.clientHeight / imgNaturalSize.height;
-                      const bindings = resolveMaskIds(
-                        masks,
-                        createdMasks,
-                        globalMasks ?? [],
-                        categoryMasks ?? [],
-                      );
-                      return masks.map((rect, i) => {
-                        const binding = bindings[i];
-                        return (
-                          <div
-                            key={i}
-                            data-testid="mask-rect"
-                            className="absolute box-border border-2 border-red-500 bg-red-500/30"
-                            style={{
-                              left: rect.x * scaleX,
-                              top: rect.y * scaleY,
-                              width: rect.width * scaleX,
-                              height: rect.height * scaleY,
-                            }}
-                          >
-                            {binding !== null && (
-                              <button
-                                data-testid={`mask-delete-${binding.scope}-${binding.id}`}
-                                aria-label="Delete mask"
-                                onClick={() => deleteMask(binding.scope, binding.id)}
-                                className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-xs font-bold leading-none text-white shadow hover:bg-red-700"
-                              >
-                                ×
-                              </button>
-                            )}
-                          </div>
-                        );
-                      });
-                    })()}
-                  {drawStart !== null && drawCurrent !== null && (
-                    <div
-                      className="pointer-events-none absolute border-2 border-dashed border-blue-500"
-                      style={{
-                        left: Math.min(drawStart.x, drawCurrent.x),
-                        top: Math.min(drawStart.y, drawCurrent.y),
-                        width: Math.abs(drawCurrent.x - drawStart.x),
-                        height: Math.abs(drawCurrent.y - drawStart.y),
-                      }}
+
+          {(() => {
+            const candidateSrc = showDiff ? snapshot.diffUrl : snapshot.candidateUrl;
+            const candidateLabel = showDiff ? "diff" : "candidate";
+            const baselinePane = (
+              <ImagePane label="baseline">
+                {snapshot.baselineUrl !== null ? (
+                  <div className="flex justify-center rounded-md bg-slate-100 p-2 dark:bg-slate-800">
+                    <AuthenticatedImage
+                      src={imageUrl(snapshot.baselineUrl)}
+                      alt="baseline"
+                      style={{ width: imageWidthPx }}
+                      className="h-auto rounded"
                     />
-                  )}
-                </div>
-              ) : (
-                <div className="flex h-32 items-center justify-center text-sm text-slate-400">
-                  not available
-                </div>
-              )}
-            </ImagePane>
-            <ImagePane label="diff">
-              {snapshot.diffUrl !== null ? (
-                <div className="rounded-md bg-slate-100 p-2 dark:bg-slate-800">
-                  <AuthenticatedImage
-                    src={imageUrl(snapshot.diffUrl)}
-                    alt="diff"
-                    className="mx-auto h-auto max-w-full rounded"
+                  </div>
+                ) : (
+                  <div className="flex h-32 items-center justify-center text-sm text-slate-400">
+                    not available
+                  </div>
+                )}
+              </ImagePane>
+            );
+            const candidatePane = (
+              <ImagePane label={candidateLabel}>
+                {candidateSrc !== null ? (
+                  <InteractiveImagePane
+                    src={imageUrl(candidateSrc)}
+                    alt={candidateLabel}
+                    widthPx={imageWidthPx}
+                    overlayRef={overlayRef}
+                    onMouseDown={handleMouseDown}
+                    onMouseMove={handleMouseMove}
+                    onMouseUp={handleMouseUp}
+                    onImageLoad={setImgNaturalSize}
+                    imgNaturalSize={imgNaturalSize}
+                    masks={masks}
+                    createdMasks={createdMasks}
+                    globalMasks={globalMasks ?? []}
+                    categoryMasks={categoryMasks ?? []}
+                    category={snapshot.category}
+                    drawStart={drawStart}
+                    drawCurrent={drawCurrent}
+                    onDeleteMask={deleteMask}
                   />
+                ) : (
+                  <div className="flex h-32 items-center justify-center text-sm text-slate-400">
+                    not available
+                  </div>
+                )}
+              </ImagePane>
+            );
+            return (
+              <>
+                <div className="flex flex-wrap items-center gap-3">
+                  <div
+                    role="group"
+                    aria-label="View mode"
+                    className="inline-flex overflow-hidden rounded-md border border-slate-300 dark:border-slate-700"
+                  >
+                    {(["dual", "single"] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        onClick={() => setViewMode(mode)}
+                        aria-pressed={viewMode === mode}
+                        className={
+                          viewMode === mode
+                            ? "bg-slate-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-slate-100 dark:text-slate-900"
+                            : "bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                        }
+                      >
+                        {mode === "dual" ? "Dual" : "Single"}
+                      </button>
+                    ))}
+                  </div>
+                  <label className="flex items-center gap-1.5 text-sm text-slate-600 dark:text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={showDiff}
+                      onChange={(e) => setShowDiff(e.target.checked)}
+                    />
+                    Show diff
+                  </label>
                 </div>
-              ) : (
-                <div className="flex h-32 items-center justify-center text-sm text-slate-400">
-                  not available
-                </div>
-              )}
-            </ImagePane>
-          </div>
+                {viewMode === "dual" ? (
+                  <div className="flex flex-wrap justify-center gap-4">
+                    {baselinePane}
+                    {candidatePane}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-3">
+                    <div
+                      role="group"
+                      aria-label="Single view image"
+                      className="inline-flex overflow-hidden rounded-md border border-slate-300 dark:border-slate-700"
+                    >
+                      <button
+                        onClick={() => setSingleTab("baseline")}
+                        aria-pressed={singleTab === "baseline"}
+                        className={
+                          singleTab === "baseline"
+                            ? "bg-slate-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-slate-100 dark:text-slate-900"
+                            : "bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                        }
+                      >
+                        Baseline
+                      </button>
+                      <button
+                        onClick={() => setSingleTab("candidate")}
+                        aria-pressed={singleTab === "candidate"}
+                        className={
+                          singleTab === "candidate"
+                            ? "bg-slate-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-slate-100 dark:text-slate-900"
+                            : "bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                        }
+                      >
+                        {showDiff ? "Diff" : "Candidate"}
+                      </button>
+                    </div>
+                    {singleTab === "baseline" ? baselinePane : candidatePane}
+                  </div>
+                )}
+              </>
+            );
+          })()}
           <div>
             <button onClick={approve} className={btnPrimary}>
               Approve
@@ -768,25 +1045,14 @@ function SnapshotDetail({
               Masks
             </h2>
             {pendingRect !== null && (
-              <div
-                data-testid="mask-scope-picker"
-                className={`flex w-fit items-center gap-2 ${card} px-3 py-2`}
-              >
-                <button onClick={() => createMask("global")} className={btnSecondary}>
-                  Save as global mask
-                </button>
-                <button onClick={() => createMask("per-image")} className={btnSecondary}>
-                  Save as mask for this snapshot
-                </button>
-                {snapshot.category !== null && (
-                  <button onClick={() => createMask("category")} className={btnSecondary}>
-                    Save as mask for this category
-                  </button>
-                )}
-                <button onClick={() => setPendingRect(null)} className={btnGhost}>
-                  Cancel
-                </button>
-              </div>
+              <MaskAssignmentMenu
+                existingCategories={existingCategories ?? []}
+                onSelectGlobal={() => createMask("global")}
+                onSelectSnapshot={() => createMask("per-image")}
+                onSelectCategory={applyCategory}
+                onCreateCategory={applyCategory}
+                onCancel={() => setPendingRect(null)}
+              />
             )}
             {masksError !== null && <p className={alertError}>{masksError}</p>}
           </section>

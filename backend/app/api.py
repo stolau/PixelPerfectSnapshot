@@ -596,6 +596,14 @@ def delete_snapshot_mask(run_id: str, name: str, mask_id: int) -> tuple[Response
     return "", 204
 
 
+@bp.get("/categories")
+def list_categories() -> dict[str, list[str]]:
+    rows = get_db().execute(
+        "SELECT DISTINCT category FROM snapshots WHERE category IS NOT NULL ORDER BY category"
+    ).fetchall()
+    return {"categories": [row["category"] for row in rows]}
+
+
 @bp.get("/categories/<category>/masks")
 def list_category_masks(category: str) -> dict[str, list[dict[str, int]]]:
     rows = get_db().execute(

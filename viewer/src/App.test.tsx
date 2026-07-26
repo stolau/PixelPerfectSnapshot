@@ -3,6 +3,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App.js";
 import { AuthenticatedImage } from "./AuthenticatedImage.js";
 import { setAuthToken } from "./authToken.js";
+import { categoryColor } from "./categoryColor.js";
+import { imageSizePx } from "./imageDisplaySize.js";
 import runsFixture from "./fixtures/runs.json";
 import runDetailFixture from "./fixtures/run-detail.json";
 import snapshotDetailFixture from "./fixtures/snapshot-detail.json";
@@ -35,6 +37,7 @@ beforeEach(() => {
     [`GET ${SNAPSHOT_URL}/history`]: { body: { history: [] } },
     [`GET ${SNAPSHOT_URL}/masks`]: { body: { masks: [] } },
     "GET /api/masks": { body: { masks: [] } },
+    "GET /api/categories": { body: { categories: [] } },
     // AuthenticatedImage fetches these directly; most tests that swap in the rendered snapshot
     // fixture render baseline/candidate/diff images and need them to resolve successfully.
     [`GET ${snapshotDetailRenderedFixture.baselineUrl}`]: blobRoute(),
@@ -61,6 +64,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   sessionStorage.clear();
+  localStorage.clear();
 });
 
 /** Every (method, url) pair the app actually sent. */
@@ -229,12 +233,12 @@ test("run detail renders each snapshot's name and status", async () => {
   expect(requests()).toContainEqual({ method: "GET", url: `/api/runs/${RUN_ID}` });
 });
 
-test("snapshot detail with null URLs shows three placeholders and no images", async () => {
+test("snapshot detail with null URLs shows two placeholders (dual view: baseline + candidate) and no images", async () => {
   await openSnapshotDetail();
 
   await screen.findByText("Status: pending");
   expect(requests()).toContainEqual({ method: "GET", url: SNAPSHOT_URL });
-  expect(screen.getAllByText("not available").length).toBe(3);
+  expect(screen.getAllByText("not available").length).toBe(2);
   // Not a blanket "no <img> anywhere" check -- the persistent nav-bar logo is legitimately
   // always present. Scoped to the snapshot images this test actually cares about.
   expect(screen.queryByAltText("baseline")).toBeNull();
@@ -242,19 +246,18 @@ test("snapshot detail with null URLs shows three placeholders and no images", as
   expect(screen.queryByAltText("diff")).toBeNull();
 });
 
-test("snapshot detail with rendered URLs shows baseline, candidate, and diff images", async () => {
+test("snapshot detail with rendered URLs shows baseline and candidate (dual view default; diff is opt-in)", async () => {
   routes[`GET ${SNAPSHOT_URL}`] = { body: snapshotDetailRenderedFixture };
   await openSnapshotDetail();
 
   await screen.findByText("Status: fail");
   const images = screen.getAllByRole("img");
-  expect(images.length).toBe(3);
+  expect(images.length).toBe(2);
   // The rendered <img> src is a blob: object URL (see AuthenticatedImage); what actually proves
   // the right resource was requested is the underlying authenticated fetch.
   await waitFor(() => {
     expect(screen.getByAltText("baseline").getAttribute("src")).toMatch(/^blob:/);
     expect(screen.getByAltText("candidate").getAttribute("src")).toMatch(/^blob:/);
-    expect(screen.getByAltText("diff").getAttribute("src")).toMatch(/^blob:/);
   });
   expect(requests()).toContainEqual({
     method: "GET",
@@ -264,8 +267,47 @@ test("snapshot detail with rendered URLs shows baseline, candidate, and diff ima
     method: "GET",
     url: snapshotDetailRenderedFixture.candidateUrl,
   });
-  expect(requests()).toContainEqual({ method: "GET", url: snapshotDetailRenderedFixture.diffUrl });
+  // Diff isn't fetched until "Show diff" is toggled on.
+  expect(requests()).not.toContainEqual({
+    method: "GET",
+    url: snapshotDetailRenderedFixture.diffUrl,
+  });
   expect(screen.queryAllByText("not available").length).toBe(0);
+});
+
+test("Show diff toggle swaps the candidate pane to the diff image", async () => {
+  routes[`GET ${SNAPSHOT_URL}`] = { body: snapshotDetailRenderedFixture };
+  await openSnapshotDetail();
+
+  await screen.findByAltText("candidate");
+  expect(screen.queryByAltText("diff")).toBeNull();
+
+  fireEvent.click(screen.getByLabelText("Show diff"));
+
+  await screen.findByAltText("diff");
+  expect(screen.queryByAltText("candidate")).toBeNull();
+  await waitFor(() => {
+    expect(requests()).toContainEqual({
+      method: "GET",
+      url: snapshotDetailRenderedFixture.diffUrl,
+    });
+  });
+});
+
+test("Single view shows one image at a time via Baseline/Candidate tabs", async () => {
+  routes[`GET ${SNAPSHOT_URL}`] = { body: snapshotDetailRenderedFixture };
+  await openSnapshotDetail();
+  await screen.findByAltText("candidate");
+
+  fireEvent.click(screen.getByRole("button", { name: "Single" }));
+
+  expect(screen.queryByAltText("baseline")).toBeNull();
+  await screen.findByAltText("candidate");
+
+  fireEvent.click(screen.getByRole("button", { name: "Baseline" }));
+
+  await screen.findByAltText("baseline");
+  expect(screen.queryByAltText("candidate")).toBeNull();
 });
 
 test("process pending POSTs to the process endpoint, refetches, and updates statuses", async () => {
@@ -316,7 +358,7 @@ test("approve success POSTs to the approve endpoint, refetches, and shows the ne
   await openSnapshotDetail();
   await screen.findByText("Status: approved-baseline-missing");
   expect(screen.queryByAltText("baseline")).toBeNull();
-  expect(screen.getAllByText("not available").length).toBe(2); // baseline + diff panes
+  expect(screen.getAllByText("not available").length).toBe(1); // baseline pane only (dual view)
 
   // After approve, the server reports "pass" with a real baseline image.
   routes[`GET ${SNAPSHOT_URL}`] = {
@@ -596,9 +638,8 @@ test("category field shows the current value; saving PATCHes the snapshot", asyn
   });
 });
 
-test("mask scope picker offers no category option when the snapshot has no category", async () => {
+test("mask assignment menu shows no category buttons when no categories exist yet, but always offers + New category", async () => {
   routes[`GET ${SNAPSHOT_URL}`] = { body: snapshotDetailRenderedFixture }; // category: null
-  routes["POST /api/masks"] = { body: { id: 1, x: 0, y: 0, width: 50, height: 25 } };
   await openSnapshotDetail();
 
   const restoreLayout = stubOverlayLayout();
@@ -608,14 +649,16 @@ test("mask scope picker offers no category option when the snapshot has no categ
     dragOverlay(screen.getByTestId("mask-overlay"));
     await screen.findByTestId("mask-scope-picker");
 
-    expect(screen.queryByRole("button", { name: "Save as mask for this category" })).toBeNull();
+    expect(screen.queryByRole("button", { name: CATEGORY })).toBeNull();
+    expect(screen.getByRole("button", { name: "+ New category" })).toBeDefined();
   } finally {
     restoreLayout();
   }
 });
 
-test("draw + save as mask for this category POSTs to the category masks endpoint and refetches it", async () => {
+test("mask assignment menu lists existing categories; picking one applies it without re-tagging an already-matching snapshot", async () => {
   routes[`GET ${SNAPSHOT_URL}`] = { body: { ...snapshotDetailRenderedFixture, category: CATEGORY } };
+  routes["GET /api/categories"] = { body: { categories: [CATEGORY, "Other"] } };
   routes[`GET ${CATEGORY_MASKS_URL}`] = { body: { masks: [] } };
   routes[`POST ${CATEGORY_MASKS_URL}`] = { body: { id: 4, x: 0, y: 0, width: 50, height: 25 } };
   await openSnapshotDetail();
@@ -626,18 +669,57 @@ test("draw + save as mask for this category POSTs to the category masks endpoint
     loadCandidateImage(img);
     dragOverlay(screen.getByTestId("mask-overlay"));
     await screen.findByTestId("mask-scope-picker");
+    await screen.findByRole("button", { name: CATEGORY });
 
-    fireEvent.click(screen.getByRole("button", { name: "Save as mask for this category" }));
+    fireEvent.click(screen.getByRole("button", { name: CATEGORY }));
     await waitFor(() => {
       expect(screen.queryByTestId("mask-scope-picker")).toBeNull();
     });
 
     expect(requestBody("POST", CATEGORY_MASKS_URL)).toEqual({ x: 0, y: 0, width: 50, height: 25 });
+    // The snapshot already carries this category -- picking it again must not PATCH.
+    expect(requests()).not.toContainEqual(
+      expect.objectContaining({ method: "PATCH", url: SNAPSHOT_URL }),
+    );
 
     const categoryMaskGets = requests().filter(
       (r) => r.method === "GET" && r.url === CATEGORY_MASKS_URL,
     );
     expect(categoryMaskGets.length).toBe(2); // mount fetch (category is set) + post-create refetch
+  } finally {
+    restoreLayout();
+  }
+});
+
+test("+ New category tags the snapshot with the new category, then creates the mask", async () => {
+  routes[`GET ${SNAPSHOT_URL}`] = { body: snapshotDetailRenderedFixture }; // category: null
+  routes[`PATCH ${SNAPSHOT_URL}`] = { body: { name: SNAPSHOT_NAME, category: CATEGORY } };
+  routes[`GET ${CATEGORY_MASKS_URL}`] = { body: { masks: [] } };
+  routes[`POST ${CATEGORY_MASKS_URL}`] = { body: { id: 5, x: 0, y: 0, width: 50, height: 25 } };
+  await openSnapshotDetail();
+
+  const restoreLayout = stubOverlayLayout();
+  try {
+    const img = await screen.findByAltText("candidate");
+    loadCandidateImage(img);
+    dragOverlay(screen.getByTestId("mask-overlay"));
+    await screen.findByTestId("mask-scope-picker");
+
+    fireEvent.click(screen.getByRole("button", { name: "+ New category" }));
+    fireEvent.change(screen.getByLabelText("New category name"), {
+      target: { value: CATEGORY },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create & apply" }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("mask-scope-picker")).toBeNull();
+    });
+
+    expect(requestBody("PATCH", SNAPSHOT_URL)).toEqual({ category: CATEGORY });
+    expect(requestBody("POST", CATEGORY_MASKS_URL)).toEqual({ x: 0, y: 0, width: 50, height: 25 });
+    // The standalone "Category" field must reflect the newly-applied category too, not just the
+    // mask -- otherwise clicking "Save category" next would silently untag the snapshot again.
+    expect((screen.getByLabelText("Category") as HTMLInputElement).value).toBe(CATEGORY);
   } finally {
     restoreLayout();
   }
@@ -656,6 +738,9 @@ test("mask overlay renders category masks with a working delete button", async (
   const rects = await screen.findAllByTestId("mask-rect");
   expect(rects.length).toBe(1);
   expect(screen.getByTestId("mask-delete-category-42")).toBeDefined();
+  // Category-scope masks get their category's deterministic color, not the default red.
+  expect(rects[0].className).toContain(categoryColor(CATEGORY).border);
+  expect(rects[0].className).not.toMatch(/\bborder-red-500\b/);
 });
 
 test("create mask failure surfaces the ApiError message and clears the pending rect", async () => {
@@ -678,6 +763,28 @@ test("create mask failure surfaces the ApiError message and clears the pending r
   } finally {
     restoreLayout();
   }
+});
+
+test("Settings image-size buttons persist the choice and reflect it via aria-pressed", async () => {
+  render(<App />);
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+  expect(screen.getByRole("button", { name: "Medium" }).getAttribute("aria-pressed")).toBe("true");
+
+  fireEvent.click(screen.getByRole("button", { name: "Large" }));
+
+  expect(screen.getByRole("button", { name: "Large" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByRole("button", { name: "Medium" }).getAttribute("aria-pressed")).toBe("false");
+  expect(localStorage.getItem("pps_image_size")).toBe("large");
+});
+
+test("snapshot images render at the size stored in Settings, not their natural viewport size", async () => {
+  localStorage.setItem("pps_image_size", "large");
+  routes[`GET ${SNAPSHOT_URL}`] = { body: snapshotDetailRenderedFixture };
+  await openSnapshotDetail();
+
+  const img = await screen.findByAltText("candidate");
+  expect(img.style.width).toBe(`${imageSizePx("large")}px`);
 });
 
 test("saving the auth token via the UI adds an Authorization header to subsequent API calls", async () => {
