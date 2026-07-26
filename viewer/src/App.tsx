@@ -5,6 +5,7 @@ import {
   createCategoryMask,
   createGlobalMask,
   createSnapshotMask,
+  deleteCategory,
   deleteCategoryMask,
   deleteGlobalMask,
   deleteSnapshotMask,
@@ -21,9 +22,11 @@ import {
   listRuns,
   listSnapshotMasks,
   processRun,
+  renameCategory,
   updateSnapshotCategory,
 } from "./api.js";
 import type {
+  CategorySummary,
   HistoryEntry,
   Mask,
   MaskRect,
@@ -205,6 +208,116 @@ function SettingsView() {
         </p>
         <ImageSizeInput />
       </section>
+      <section className={`${card} flex flex-col gap-3 p-4`}>
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          Categories
+        </h3>
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          Rename or delete mask categories. Delete is refused while any snapshot is still tagged
+          with it.
+        </p>
+        <CategoriesSection />
+      </section>
+    </div>
+  );
+}
+
+function CategoriesSection() {
+  const [categories, setCategories] = useState<CategorySummary[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameInput, setRenameInput] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  function refetch() {
+    listCategories().then(setCategories, (err: Error) => setError(err.message));
+  }
+
+  useEffect(() => {
+    refetch();
+  }, []);
+
+  async function saveRename(oldName: string) {
+    setActionError(null);
+    try {
+      await renameCategory(oldName, renameInput);
+      setRenaming(null);
+      refetch();
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setActionError(`Rename failed (${err.status}): ${err.message}`);
+      } else {
+        setActionError(`Rename failed: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  async function remove(name: string) {
+    setActionError(null);
+    try {
+      await deleteCategory(name);
+      refetch();
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setActionError(`Delete failed (${err.status}): ${err.message}`);
+      } else {
+        setActionError(`Delete failed: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  if (error !== null) return <p className={alertError}>Error: {error}</p>;
+  if (categories === null) return <p className={mutedCenter}>Loading…</p>;
+
+  return (
+    <div className="flex flex-col gap-2">
+      {categories.length === 0 && (
+        <p className="text-sm text-slate-500 dark:text-slate-400">No categories yet.</p>
+      )}
+      {categories.map((c) => {
+        const color = categoryColor(c.name);
+        return (
+          <div key={c.name} className="flex items-center gap-2">
+            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${color.dot}`} />
+            {renaming === c.name ? (
+              <>
+                <input
+                  type="text"
+                  value={renameInput}
+                  onChange={(e) => setRenameInput(e.target.value)}
+                  aria-label={`Rename ${c.name}`}
+                  className="w-40 rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 focus:border-slate-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                />
+                <button onClick={() => saveRename(c.name)} className={btnSecondary}>
+                  Save
+                </button>
+                <button onClick={() => setRenaming(null)} className={btnGhost}>
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                <span className="flex-1 text-sm text-slate-700 dark:text-slate-200">
+                  {c.name} — {c.snapshotCount} snapshots, {c.maskCount} masks
+                </span>
+                <button
+                  onClick={() => {
+                    setRenaming(c.name);
+                    setRenameInput(c.name);
+                  }}
+                  className={btnSecondary}
+                >
+                  Rename
+                </button>
+                <button onClick={() => remove(c.name)} className={btnGhost}>
+                  Delete
+                </button>
+              </>
+            )}
+          </div>
+        );
+      })}
+      {actionError !== null && <p className={alertError}>{actionError}</p>}
     </div>
   );
 }
@@ -899,7 +1012,10 @@ function SnapshotDetail({
       setExistingCategories(null);
       return;
     }
-    listCategories().then(setExistingCategories, (err: Error) => setMasksError(err.message));
+    listCategories().then(
+      (list) => setExistingCategories(list.map((c) => c.name)),
+      (err: Error) => setMasksError(err.message),
+    );
   }, [pendingRect !== null]);
 
   async function refetchMasks(scope: MaskScope, category?: string) {

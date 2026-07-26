@@ -842,7 +842,14 @@ test("mask assignment menu shows no category buttons when no categories exist ye
 
 test("mask assignment menu lists existing categories; picking one applies it without re-tagging an already-matching snapshot", async () => {
   routes[`GET ${SNAPSHOT_URL}`] = { body: { ...snapshotDetailRenderedFixture, category: CATEGORY } };
-  routes["GET /api/categories"] = { body: { categories: [CATEGORY, "Other"] } };
+  routes["GET /api/categories"] = {
+    body: {
+      categories: [
+        { name: CATEGORY, snapshotCount: 1, maskCount: 0 },
+        { name: "Other", snapshotCount: 1, maskCount: 0 },
+      ],
+    },
+  };
   routes[`GET ${CATEGORY_MASKS_URL}`] = { body: { masks: [] } };
   routes[`POST ${CATEGORY_MASKS_URL}`] = { body: { id: 4, x: 0, y: 0, width: 50, height: 25 } };
   await openSnapshotDetail();
@@ -969,6 +976,111 @@ test("snapshot images render at the size stored in Settings, not their natural v
 
   const img = await screen.findByAltText("candidate");
   expect(img.style.width).toBe(`${imageSizePx("large")}px`);
+});
+
+test("Categories section lists categories with counts and a color dot", async () => {
+  routes["GET /api/categories"] = {
+    body: {
+      categories: [
+        { name: "App Shell", snapshotCount: 3, maskCount: 1 },
+        { name: "Nav Bar", snapshotCount: 0, maskCount: 2 },
+      ],
+    },
+  };
+  render(<App />);
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+  await screen.findByText("App Shell — 3 snapshots, 1 masks");
+  expect(screen.getByText("Nav Bar — 0 snapshots, 2 masks")).toBeDefined();
+});
+
+test("Categories section shows an empty state when there are no categories", async () => {
+  routes["GET /api/categories"] = { body: { categories: [] } };
+  render(<App />);
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+  await screen.findByText("No categories yet.");
+});
+
+test("renaming a category PATCHes the new name and refetches the list", async () => {
+  routes["GET /api/categories"] = {
+    body: { categories: [{ name: "App Shell", snapshotCount: 1, maskCount: 0 }] },
+  };
+  routes["PATCH /api/categories/App%20Shell"] = { body: { name: "Shell" } };
+  render(<App />);
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  await screen.findByText("App Shell — 1 snapshots, 0 masks");
+
+  fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+  const input = screen.getByLabelText("Rename App Shell") as HTMLInputElement;
+  expect(input.value).toBe("App Shell");
+  fireEvent.change(input, { target: { value: "Shell" } });
+
+  routes["GET /api/categories"] = {
+    body: { categories: [{ name: "Shell", snapshotCount: 1, maskCount: 0 }] },
+  };
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  await screen.findByText("Shell — 1 snapshots, 0 masks");
+  expect(requestBody("PATCH", "/api/categories/App%20Shell")).toEqual({ name: "Shell" });
+});
+
+test("rename conflict shows an inline error and leaves the category untouched", async () => {
+  routes["GET /api/categories"] = {
+    body: { categories: [{ name: "App Shell", snapshotCount: 1, maskCount: 0 }] },
+  };
+  routes["PATCH /api/categories/App%20Shell"] = {
+    status: 409,
+    body: { error: "category 'Nav Bar' already exists" },
+  };
+  render(<App />);
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  await screen.findByText("App Shell — 1 snapshots, 0 masks");
+
+  fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+  fireEvent.change(screen.getByLabelText("Rename App Shell"), { target: { value: "Nav Bar" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  await screen.findByText("Rename failed (409): category 'Nav Bar' already exists");
+  // Stays in edit mode after a failed rename, so the attempted value can be fixed and retried.
+  expect((screen.getByLabelText("Rename App Shell") as HTMLInputElement).value).toBe("Nav Bar");
+});
+
+test("deleting a category DELETEs and refetches the list", async () => {
+  routes["GET /api/categories"] = {
+    body: { categories: [{ name: "App Shell", snapshotCount: 0, maskCount: 2 }] },
+  };
+  routes["DELETE /api/categories/App%20Shell"] = { status: 204, body: undefined };
+  render(<App />);
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  await screen.findByText("App Shell — 0 snapshots, 2 masks");
+
+  routes["GET /api/categories"] = { body: { categories: [] } };
+  fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+  await screen.findByText("No categories yet.");
+  expect(requests()).toContainEqual({
+    method: "DELETE",
+    url: "/api/categories/App%20Shell",
+  });
+});
+
+test("delete refusal (category still tagged) shows an inline error and leaves it listed", async () => {
+  routes["GET /api/categories"] = {
+    body: { categories: [{ name: "App Shell", snapshotCount: 2, maskCount: 1 }] },
+  };
+  routes["DELETE /api/categories/App%20Shell"] = {
+    status: 409,
+    body: { error: "cannot delete category 'App Shell' while 2 snapshot(s) are still tagged with it" },
+  };
+  render(<App />);
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  await screen.findByText("App Shell — 2 snapshots, 1 masks");
+
+  fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+  await screen.findByText(/Delete failed \(409\)/);
+  expect(screen.getByText("App Shell — 2 snapshots, 1 masks")).toBeDefined();
 });
 
 test("saving the auth token via the UI adds an Authorization header to subsequent API calls", async () => {

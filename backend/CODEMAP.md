@@ -82,8 +82,23 @@ approved baselines. HTTP contract: `docs/API.md`. Upload payload contract:
   400 if the mask exceeds the resolved snapshot's viewport bounds; 404 unknown run or name),
   `DELETE /api/runs/<run_id>/snapshots/<name>/masks/<mask_id>` (scoped delete by (name, viewport);
   404 unknown run/name or mask id not in that scope),
-  `GET /api/categories` (distinct category names currently in use by any snapshot, sorted — the
-  viewer's mask-assignment menu uses this to list existing categories to pick from),
+  `GET /api/categories` (every category currently in use by a snapshot OR a mask — a `UNION` of
+  both tables, since a category's masks can outlive every snapshot that once carried it — sorted,
+  with `snapshotCount`/`maskCount` per entry; the viewer's mask-assignment menu uses the names to
+  list existing categories to pick from, and Settings' category-management section uses the full
+  shape),
+  `PATCH /api/categories/<category>` (rename; body `{"name"}`; cascades to every
+  `snapshots.category` and `masks.category` row holding the old name — no dedicated categories
+  table exists, so a plain string-keyed `UPDATE` is the only rename mechanism there is; runs its
+  existence/conflict checks under `BEGIN IMMEDIATE`, a third instance of the same idiom
+  `upload_snapshot`/`update_snapshot_category` already use, since without it a concurrent
+  `PATCH .../snapshots/<name>` could tag a snapshot into the target name mid-rename and produce
+  exactly the silent merge the 409 exists to prevent; 400 invalid `name`, 404 unknown category, 409
+  `name` already names a *different* category),
+  `DELETE /api/categories/<category>` (removes the category's masks; also under `BEGIN IMMEDIATE`,
+  for the same race-closing reason — otherwise a concurrent snapshot-tagging PATCH could land
+  between the "no snapshot is tagged with this" check and the delete; 404 unknown category, 409 if
+  any snapshot is still tagged with it, naming the count),
   `GET /api/categories/<category>/masks` / `POST /api/categories/<category>/masks` /
   `DELETE /api/categories/<category>/masks/<mask_id>` (mask categories — a third scope, alongside
   global and per-image: a mask saved against a category applies to every snapshot tagged with that

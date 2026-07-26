@@ -221,9 +221,27 @@ export function deleteSnapshotMask(runId: string, name: string, id: number): Pro
   );
 }
 
-export async function listCategories(): Promise<string[]> {
-  const body = await request<{ categories: string[] }>("/api/categories");
+export interface CategorySummary {
+  name: string;
+  snapshotCount: number;
+  maskCount: number;
+}
+
+export async function listCategories(): Promise<CategorySummary[]> {
+  const body = await request<{ categories: CategorySummary[] }>("/api/categories");
   return body.categories;
+}
+
+export function renameCategory(oldName: string, newName: string): Promise<{ name: string }> {
+  return request<{ name: string }>(`/api/categories/${encodeURIComponent(oldName)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: newName }),
+  });
+}
+
+export function deleteCategory(name: string): Promise<void> {
+  return request<void>(`/api/categories/${encodeURIComponent(name)}`, { method: "DELETE" });
 }
 
 export async function listCategoryMasks(category: string): Promise<Mask[]> {

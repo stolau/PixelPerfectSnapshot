@@ -561,6 +561,126 @@ def test_list_categories_empty(client):
     assert response.get_json() == {"categories": []}
 
 
+def test_list_categories_includes_orphaned_mask_only_category(client):
+    # A category can have masks with zero currently-tagged snapshots: category_viewport() only
+    # requires a snapshot to exist at mask-creation time, not to still carry that category now.
+    example = load_example()
+    run_id = create_run(client)
+    upload_snapshot(client, run_id, dict(example, category=CATEGORY))
+    client.post(f"/api/categories/{CATEGORY_URL}/masks", json={"x": 0, "y": 0, "width": 5, "height": 5})
+
+    # Re-tag the only snapshot away, orphaning the category's mask.
+    client.patch(f"/api/runs/{run_id}/snapshots/{example['name']}", json={"category": "Other"})
+
+    response = client.get("/api/categories")
+    assert response.status_code == 200
+    categories = {c["name"]: c for c in response.get_json()["categories"]}
+    assert categories[CATEGORY] == {"name": CATEGORY, "snapshotCount": 0, "maskCount": 1}
+    assert categories["Other"] == {"name": "Other", "snapshotCount": 1, "maskCount": 0}
+
+
+def test_rename_category_cascades_to_snapshots_and_masks(client):
+    example = load_example()
+    run_id = create_run(client)
+    upload_snapshot(client, run_id, dict(example, category=CATEGORY))
+    client.post(f"/api/categories/{CATEGORY_URL}/masks", json={"x": 0, "y": 0, "width": 5, "height": 5})
+
+    response = client.patch(f"/api/categories/{CATEGORY_URL}", json={"name": "Renamed"})
+    assert response.status_code == 200
+    assert response.get_json() == {"name": "Renamed"}
+
+    assert (
+        client.get(f"/api/runs/{run_id}/snapshots/{example['name']}").get_json()["category"]
+        == "Renamed"
+    )
+    renamed_masks = client.get("/api/categories/Renamed/masks").get_json()["masks"]
+    assert len(renamed_masks) == 1
+    assert {k: v for k, v in renamed_masks[0].items() if k != "id"} == {
+        "x": 0, "y": 0, "width": 5, "height": 5,
+    }
+    assert client.get(f"/api/categories/{CATEGORY_URL}/masks").get_json() == {"masks": []}
+    names = {c["name"] for c in client.get("/api/categories").get_json()["categories"]}
+    assert "Renamed" in names
+    assert CATEGORY not in names
+
+
+def test_rename_category_to_self_is_not_a_conflict(client):
+    example = load_example()
+    run_id = create_run(client)
+    upload_snapshot(client, run_id, dict(example, category=CATEGORY))
+
+    response = client.patch(f"/api/categories/{CATEGORY_URL}", json={"name": CATEGORY})
+    assert response.status_code == 200
+
+
+def test_rename_category_conflict_with_different_existing_category_409(client):
+    example = load_example()
+    run_1 = create_run(client)
+    upload_snapshot(client, run_1, dict(example, category="Alpha"))
+    run_2 = create_run(client)
+    upload_snapshot(client, run_2, dict(example, name="other-page", category="Beta"))
+
+    response = client.patch("/api/categories/Alpha", json={"name": "Beta"})
+    assert response.status_code == 409
+    assert "error" in response.get_json()
+
+    # Neither category was touched by the rejected rename.
+    categories = {c["name"] for c in client.get("/api/categories").get_json()["categories"]}
+    assert categories == {"Alpha", "Beta"}
+
+
+def test_rename_category_unknown_404(client):
+    response = client.patch("/api/categories/no-such-category", json={"name": "New"})
+    assert response.status_code == 404
+    assert "error" in response.get_json()
+
+
+def test_rename_category_validation_400(client):
+    example = load_example()
+    run_id = create_run(client)
+    upload_snapshot(client, run_id, dict(example, category=CATEGORY))
+
+    for payload in [{}, {"name": ""}, {"name": 123}, {"name": None}]:
+        response = client.patch(f"/api/categories/{CATEGORY_URL}", json=payload)
+        assert response.status_code == 400, payload
+        assert "error" in response.get_json()
+
+
+def test_delete_category_refuses_while_snapshot_tagged_409(client):
+    example = load_example()
+    run_id = create_run(client)
+    upload_snapshot(client, run_id, dict(example, category=CATEGORY))
+
+    response = client.delete(f"/api/categories/{CATEGORY_URL}")
+    assert response.status_code == 409
+    assert "error" in response.get_json()
+    # Untouched: category still resolves.
+    assert (
+        client.get(f"/api/runs/{run_id}/snapshots/{example['name']}").get_json()["category"]
+        == CATEGORY
+    )
+
+
+def test_delete_category_succeeds_once_no_snapshots_tagged(client):
+    example = load_example()
+    run_id = create_run(client)
+    upload_snapshot(client, run_id, dict(example, category=CATEGORY))
+    client.post(f"/api/categories/{CATEGORY_URL}/masks", json={"x": 0, "y": 0, "width": 5, "height": 5})
+    client.patch(f"/api/runs/{run_id}/snapshots/{example['name']}", json={"category": None})
+
+    response = client.delete(f"/api/categories/{CATEGORY_URL}")
+    assert response.status_code == 204
+
+    names = {c["name"] for c in client.get("/api/categories").get_json()["categories"]}
+    assert CATEGORY not in names
+
+
+def test_delete_category_unknown_404(client):
+    response = client.delete("/api/categories/no-such-category")
+    assert response.status_code == 404
+    assert "error" in response.get_json()
+
+
 def test_list_categories_distinct_and_sorted(client):
     example = load_example()
     run_1 = create_run(client)
@@ -574,7 +694,12 @@ def test_list_categories_distinct_and_sorted(client):
 
     response = client.get("/api/categories")
     assert response.status_code == 200
-    assert response.get_json() == {"categories": ["Alpha", "Zeta"]}
+    assert response.get_json() == {
+        "categories": [
+            {"name": "Alpha", "snapshotCount": 1, "maskCount": 0},
+            {"name": "Zeta", "snapshotCount": 2, "maskCount": 0},
+        ]
+    }
 
 
 def test_upload_snapshot_category_viewport_conflict_400(client):
