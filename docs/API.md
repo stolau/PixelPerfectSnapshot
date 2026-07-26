@@ -238,11 +238,37 @@ Delete a per-image mask scoped to this snapshot's (name, viewport) key.
 `204` on success · `404` unknown run or name, or `mask_id` not found for this (name, viewport) key.
 
 ### `GET /api/categories`
-List distinct category names currently in use by any snapshot, sorted.
+List every category currently in use — by a snapshot's `category`, by a mask's `category`, or
+both — sorted by name, with usage counts.
 `200`:
 ```json
-{"categories": ["App Shell", "Checkout Flow"]}
+{
+  "categories": [
+    {"name": "App Shell", "snapshotCount": 3, "maskCount": 1},
+    {"name": "Checkout Flow", "snapshotCount": 0, "maskCount": 2}
+  ]
+}
 ```
+`snapshotCount`/`maskCount` can each independently be `0` — a category can have masks with no
+snapshot currently tagged (every snapshot that once carried it was later re-tagged elsewhere;
+`POST /api/categories/<category>/masks` only requires a snapshot to exist *at creation time*, not
+to still exist now), or a snapshot tagged with a category that has no masks yet.
+
+### `PATCH /api/categories/<category>`
+Rename a category. Body: `{"name": "<new-name>"}`. Cascades to every `snapshots.category` and
+`masks.category` row currently holding the old name — categories have no dedicated table, so this
+is the only way a rename can happen.
+`200` → `{"name": "<new-name>"}`
+`400` → `name` missing, empty, or not a string. `404` → `category` isn't in use by any snapshot or
+mask. `409` → `name` already names a *different* existing category (rejected, not merged — to
+combine two categories, retag the snapshots by hand first so only one category remains, then
+delete the other).
+
+### `DELETE /api/categories/<category>`
+Delete a category — removes its masks. Refuses if any snapshot is still tagged with it (untag
+those snapshots first, e.g. via `PATCH .../snapshots/<name>` or the viewer's Category field).
+`204` on success · `404` unknown category · `409` → `{"error"}` names how many snapshots are still
+tagged with it.
 
 ### `GET /api/categories/<category>/masks`
 List masks scoped to `category` (apply to every snapshot tagged with it, regardless of `name`).

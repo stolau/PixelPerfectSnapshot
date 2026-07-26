@@ -617,11 +617,79 @@ def delete_snapshot_mask(run_id: str, name: str, mask_id: int) -> tuple[Response
 
 
 @bp.get("/categories")
-def list_categories() -> dict[str, list[str]]:
+def list_categories() -> dict[str, list[dict[str, object]]]:
     rows = get_db().execute(
-        "SELECT DISTINCT category FROM snapshots WHERE category IS NOT NULL ORDER BY category"
+        "SELECT category,"
+        " (SELECT COUNT(*) FROM snapshots s WHERE s.category = names.category) AS snapshot_count,"
+        " (SELECT COUNT(*) FROM masks m WHERE m.category = names.category) AS mask_count"
+        " FROM ("
+        "   SELECT category FROM snapshots WHERE category IS NOT NULL"
+        "   UNION"
+        "   SELECT category FROM masks WHERE category IS NOT NULL"
+        " ) AS names"
+        " ORDER BY category"
     ).fetchall()
-    return {"categories": [row["category"] for row in rows]}
+    return {
+        "categories": [
+            {
+                "name": row["category"],
+                "snapshotCount": row["snapshot_count"],
+                "maskCount": row["mask_count"],
+            }
+            for row in rows
+        ]
+    }
+
+
+def _category_exists(db: sqlite3.Connection, category: str) -> bool:
+    row = db.execute(
+        "SELECT 1 FROM snapshots WHERE category = ?"
+        " UNION SELECT 1 FROM masks WHERE category = ? LIMIT 1",
+        (category, category),
+    ).fetchone()
+    return row is not None
+
+
+@bp.patch("/categories/<category>")
+def rename_category(category: str) -> tuple[Response, int] | tuple[dict[str, str], int]:
+    payload = request.get_json(silent=True)
+    new_name = payload.get("name") if isinstance(payload, dict) else None
+    if not isinstance(new_name, str) or not new_name:
+        return _error("name must be a non-empty string", 400)
+    db = get_db()
+    db.execute("BEGIN IMMEDIATE")
+    if not _category_exists(db, category):
+        db.rollback()
+        return _error(f"category {category!r} not found", 404)
+    if new_name != category and _category_exists(db, new_name):
+        db.rollback()
+        return _error(f"category {new_name!r} already exists", 409)
+    db.execute("UPDATE snapshots SET category = ? WHERE category = ?", (new_name, category))
+    db.execute("UPDATE masks SET category = ? WHERE category = ?", (new_name, category))
+    db.commit()
+    return {"name": new_name}, 200
+
+
+@bp.delete("/categories/<category>")
+def delete_category(category: str) -> tuple[Response, int] | tuple[str, int]:
+    db = get_db()
+    db.execute("BEGIN IMMEDIATE")
+    if not _category_exists(db, category):
+        db.rollback()
+        return _error(f"category {category!r} not found", 404)
+    snapshot_count = db.execute(
+        "SELECT COUNT(*) AS n FROM snapshots WHERE category = ?", (category,)
+    ).fetchone()["n"]
+    if snapshot_count > 0:
+        db.rollback()
+        return _error(
+            f"cannot delete category {category!r} while {snapshot_count} snapshot(s) are still"
+            " tagged with it",
+            409,
+        )
+    db.execute("DELETE FROM masks WHERE category = ?", (category,))
+    db.commit()
+    return "", 204
 
 
 @bp.get("/categories/<category>/masks")

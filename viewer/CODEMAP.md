@@ -11,8 +11,13 @@ Consumes the backend HTTP API (`docs/API.md`).
   return to the run list; "Branches & Releases" and "Settings" links, each highlighted when
   active) plus state-based views — run list → run detail → snapshot detail, a standalone
   `Settings` view holding `AuthTokenInput` (shows the currently stored auth token, if any, in a
-  password field with "Save token" / "Clear token" buttons wired to `setAuthToken()`) and
+  password field with "Save token" / "Clear token" buttons wired to `setAuthToken()`),
   `ImageSizeInput` (Small/Medium/Large buttons wired to `imageDisplaySize.ts`'s `setImageSize()`),
+  and `CategoriesSection` (one row per category from `listCategories()` — a `categoryColor()` dot,
+  name, "N snapshots, M masks" counts, inline Rename [text input + Save/Cancel, mirroring
+  `MaskAssignmentMenu`'s "+ New category" field], and Delete; both actions refetch the list on
+  success and show the server's error inline on failure — a rejected rename stays in edit mode
+  with the attempted value still in the input, so it can be fixed and retried rather than lost),
   and a `ScopesView` (see below). Run list rows show a color-coded verdict pill (`statusStyles()`,
   shared with the snapshot-status pill — `fail`/`pass`/`pending`, computed server-side by
   `GET /api/runs`), a client-computed sequential `Run #N` (oldest run is #1 **across the full
@@ -141,8 +146,10 @@ Consumes the backend HTTP API (`docs/API.md`).
   Also exports `imageUrl(path)`, which applies the same `VITE_API_BASE` prefix to image srcs, and
   `getSnapshotHistory(id, name)` / `historyImageUrl(id, name, timestamp)` for the history list and
   its per-entry image URLs. `SnapshotDetail` includes `category: string | null`;
-  `updateSnapshotCategory(id, name, category)` PATCHes it; `listCategories()` lists all distinct
-  category names currently in use (`GET /api/categories`), for the mask-assignment menu. Mask
+  `updateSnapshotCategory(id, name, category)` PATCHes it; `listCategories()` returns
+  `CategorySummary[]` (`{name, snapshotCount, maskCount}`, `GET /api/categories`) — the
+  mask-assignment menu maps it down to names only, `CategoriesSection` uses the full shape;
+  `renameCategory(oldName, newName)` / `deleteCategory(name)` back the latter's actions. Mask
   CRUD: `Mask` (has `id`) and `MaskRect` (no `id`, the shape returned by the combined per-snapshot
   masks endpoint) types, plus `listGlobalMasks()` / `createGlobalMask(rect)` /
   `deleteGlobalMask(id)` for global masks, `listSnapshotMasks(id, name)` / `createSnapshotMask(id,
