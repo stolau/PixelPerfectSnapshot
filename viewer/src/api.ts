@@ -8,9 +8,15 @@ export interface Viewport {
   height: number;
 }
 
+export interface RunScope {
+  kind: "branch" | "release";
+  id: string;
+}
+
 export interface RunSummary {
   id: string;
   createdAt: string;
+  scope: RunScope | null;
   snapshotCount: number;
   status: RunStatus;
   newCount: number;
@@ -74,6 +80,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export async function listRuns(): Promise<RunSummary[]> {
   const body = await request<{ runs: RunSummary[] }>("/api/runs");
   return body.runs;
+}
+
+export async function listBranches(): Promise<string[]> {
+  const body = await request<{ branches: string[] }>("/api/branches");
+  return body.branches;
+}
+
+export interface ReleaseSummary {
+  id: string;
+  createdAt: string;
+}
+
+export async function listReleases(): Promise<ReleaseSummary[]> {
+  const body = await request<{ releases: ReleaseSummary[] }>("/api/releases");
+  return body.releases;
 }
 
 export function getRun(id: string): Promise<RunDetail> {

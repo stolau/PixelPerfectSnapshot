@@ -1223,3 +1223,51 @@ def test_list_runs_counts_for_scoped_run_compare_against_master_only(client, tmp
     # covered by this branch run's snapshots, even though this run was never itself compared
     # against master baselines during rendering.
     assert branch_row["removedCount"] == 1
+
+
+def test_list_runs_includes_scope(client):
+    master_run = create_run(client)
+    branch_run = create_scoped_run(client, "branch", "feature-x")
+    client.post("/api/releases", json={"id": "v1"})
+    release_run = create_scoped_run(client, "release", "v1")
+
+    assert run_by_id(client, master_run)["scope"] is None
+    assert run_by_id(client, branch_run)["scope"] == {"kind": "branch", "id": "feature-x"}
+    assert run_by_id(client, release_run)["scope"] == {"kind": "release", "id": "v1"}
+
+
+def test_list_branches_empty(client):
+    response = client.get("/api/branches")
+    assert response.status_code == 200
+    assert response.get_json() == {"branches": []}
+
+
+def test_list_branches_distinct_and_sorted(client):
+    create_scoped_run(client, "branch", "zeta")
+    create_scoped_run(client, "branch", "alpha")
+    create_scoped_run(client, "branch", "zeta")  # second run on the same branch
+    create_run(client)  # master run, must not appear
+
+    response = client.get("/api/branches")
+    assert response.status_code == 200
+    assert response.get_json() == {"branches": ["alpha", "zeta"]}
+
+
+def test_list_releases_empty(client):
+    response = client.get("/api/releases")
+    assert response.status_code == 200
+    assert response.get_json() == {"releases": []}
+
+
+def test_list_releases_newest_first(client):
+    r1 = client.post("/api/releases", json={"id": "v1"}).get_json()
+    r2 = client.post("/api/releases", json={"id": "v2"}).get_json()
+
+    response = client.get("/api/releases")
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "releases": [
+            {"id": "v2", "createdAt": r2["createdAt"]},
+            {"id": "v1", "createdAt": r1["createdAt"]},
+        ]
+    }

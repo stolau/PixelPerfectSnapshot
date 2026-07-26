@@ -13,9 +13,11 @@ import {
   getSnapshotHistory,
   historyImageUrl,
   imageUrl,
+  listBranches,
   listCategories,
   listCategoryMasks,
   listGlobalMasks,
+  listReleases,
   listRuns,
   listSnapshotMasks,
   processRun,
@@ -25,6 +27,7 @@ import type {
   HistoryEntry,
   Mask,
   MaskRect,
+  ReleaseSummary,
   RunDetail as RunDetailData,
   RunSummary,
   SnapshotDetail as SnapshotDetailData,
@@ -35,11 +38,17 @@ import { categoryColor } from "./categoryColor.js";
 import { getImageSize, imageSizePx, setImageSize } from "./imageDisplaySize.js";
 import type { ImageSize } from "./imageDisplaySize.js";
 
+interface ScopeFilter {
+  kind: "branch" | "release";
+  id: string;
+}
+
 type View =
-  | { kind: "runs" }
-  | { kind: "run"; runId: string }
-  | { kind: "snapshot"; runId: string; name: string }
-  | { kind: "settings" };
+  | { kind: "runs"; filter?: ScopeFilter }
+  | { kind: "run"; runId: string; filter?: ScopeFilter }
+  | { kind: "snapshot"; runId: string; name: string; filter?: ScopeFilter }
+  | { kind: "settings" }
+  | { kind: "scopes" };
 
 const btnPrimary =
   "inline-flex items-center justify-center rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white";
@@ -99,23 +108,35 @@ export function App() {
       <NavBar view={view} onNavigate={setView} />
       <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-8">
         {view.kind === "runs" && (
-          <RunList onSelectRun={(runId) => setView({ kind: "run", runId })} />
+          <RunList
+            filter={view.filter}
+            onSelectRun={(runId) => setView({ kind: "run", runId, filter: view.filter })}
+            onBack={view.filter !== undefined ? () => setView({ kind: "scopes" }) : undefined}
+          />
         )}
         {view.kind === "run" && (
           <RunDetail
             runId={view.runId}
-            onSelectSnapshot={(name) => setView({ kind: "snapshot", runId: view.runId, name })}
-            onBack={() => setView({ kind: "runs" })}
+            onSelectSnapshot={(name) =>
+              setView({ kind: "snapshot", runId: view.runId, name, filter: view.filter })
+            }
+            onBack={() => setView({ kind: "runs", filter: view.filter })}
           />
         )}
         {view.kind === "snapshot" && (
           <SnapshotDetail
             runId={view.runId}
             name={view.name}
-            onBack={() => setView({ kind: "run", runId: view.runId })}
+            onBack={() => setView({ kind: "run", runId: view.runId, filter: view.filter })}
           />
         )}
         {view.kind === "settings" && <SettingsView />}
+        {view.kind === "scopes" && (
+          <ScopesView
+            onSelectBranch={(id) => setView({ kind: "runs", filter: { kind: "branch", id } })}
+            onSelectRelease={(id) => setView({ kind: "runs", filter: { kind: "release", id } })}
+          />
+        )}
       </div>
     </div>
   );
@@ -133,16 +154,28 @@ function NavBar({ view, onNavigate }: { view: View; onNavigate: (view: View) => 
           <img src="/mark.svg" alt="" className="h-8 w-8 rounded-md" />
           <h1 className="text-lg font-semibold tracking-tight">PixelPerfectSnapshot</h1>
         </button>
-        <button
-          onClick={() => onNavigate({ kind: "settings" })}
-          className={
-            view.kind === "settings"
-              ? "rounded-md bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-900 dark:bg-slate-800 dark:text-slate-100"
-              : btnGhost
-          }
-        >
-          Settings
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => onNavigate({ kind: "scopes" })}
+            className={
+              view.kind === "scopes"
+                ? "rounded-md bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-900 dark:bg-slate-800 dark:text-slate-100"
+                : btnGhost
+            }
+          >
+            Branches &amp; Releases
+          </button>
+          <button
+            onClick={() => onNavigate({ kind: "settings" })}
+            className={
+              view.kind === "settings"
+                ? "rounded-md bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-900 dark:bg-slate-800 dark:text-slate-100"
+                : btnGhost
+            }
+          >
+            Settings
+          </button>
+        </div>
       </div>
     </nav>
   );
@@ -236,7 +269,15 @@ function AuthTokenInput() {
   );
 }
 
-function RunList({ onSelectRun }: { onSelectRun: (runId: string) => void }) {
+function RunList({
+  filter,
+  onSelectRun,
+  onBack,
+}: {
+  filter?: ScopeFilter;
+  onSelectRun: (runId: string) => void;
+  onBack?: () => void;
+}) {
   const [runs, setRuns] = useState<RunSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -246,40 +287,139 @@ function RunList({ onSelectRun }: { onSelectRun: (runId: string) => void }) {
 
   if (error !== null) return <p className={alertError}>Error: {error}</p>;
   if (runs === null) return <p className={mutedCenter}>Loading…</p>;
-  if (runs.length === 0) return <p className={mutedCenter}>No runs yet.</p>;
+
+  // buildNumber is each run's true position across ALL runs (oldest is #1) -- computed here,
+  // before any scope filtering below, so a branch/release's runs keep their real global build
+  // number instead of a renumbered ordinal local to the filtered subset.
+  const numbered = runs.map((run, index) => ({ run, buildNumber: runs.length - index }));
+  const visible =
+    filter === undefined
+      ? numbered
+      : numbered.filter(
+          ({ run }) => run.scope !== null && run.scope.kind === filter.kind && run.scope.id === filter.id,
+        );
 
   return (
-    <ul className="flex flex-col gap-2">
-      {runs.map((run, index) => {
-        const buildNumber = runs.length - index; // list is newest-first; oldest run is #1
-        const { pill } = statusStyles(run.status);
-        return (
-          <li key={run.id}>
-            <button
-              onClick={() => onSelectRun(run.id)}
-              className={`flex w-full items-center gap-3 ${card} px-4 py-3 text-left text-sm text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:shadow dark:text-slate-200 dark:hover:border-slate-700`}
-            >
-              <span
-                data-testid={`run-status-pill-${run.id}`}
-                className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${pill}`}
+    <div className="flex flex-col gap-2">
+      {onBack !== undefined && (
+        <div>
+          <button onClick={onBack} className={btnGhost}>
+            Back
+          </button>
+        </div>
+      )}
+      {filter !== undefined && (
+        <h2 className="text-lg font-semibold tracking-tight">
+          {filter.kind === "branch" ? "Branch" : "Release"}: {filter.id}
+        </h2>
+      )}
+      {visible.length === 0 ? (
+        <p className={mutedCenter}>No runs yet.</p>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {visible.map(({ run, buildNumber }) => {
+            const { pill } = statusStyles(run.status);
+            return (
+              <li key={run.id}>
+                <button
+                  onClick={() => onSelectRun(run.id)}
+                  className={`flex w-full items-center gap-3 ${card} px-4 py-3 text-left text-sm text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:shadow dark:text-slate-200 dark:hover:border-slate-700`}
+                >
+                  <span
+                    data-testid={`run-status-pill-${run.id}`}
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${pill}`}
+                  >
+                    {run.status}
+                  </span>
+                  <span className="flex-1">
+                    Run #{buildNumber} — {formatRunDate(run.createdAt)} — {run.snapshotCount} snapshots
+                  </span>
+                  {run.scope !== null && (
+                    <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                      {run.scope.kind}: {run.scope.id}
+                    </span>
+                  )}
+                  {(run.newCount > 0 || run.removedCount > 0) && (
+                    <span className="shrink-0 text-xs text-slate-400 dark:text-slate-500">
+                      {run.newCount > 0 ? `+${run.newCount} new` : null}
+                      {run.newCount > 0 && run.removedCount > 0 ? ", " : null}
+                      {run.removedCount > 0 ? `-${run.removedCount} missing` : null}
+                    </span>
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function ScopesView({
+  onSelectBranch,
+  onSelectRelease,
+}: {
+  onSelectBranch: (id: string) => void;
+  onSelectRelease: (id: string) => void;
+}) {
+  const [branches, setBranches] = useState<string[] | null>(null);
+  const [releases, setReleases] = useState<ReleaseSummary[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    listBranches().then(setBranches, (err: Error) => setError(err.message));
+  }, []);
+
+  useEffect(() => {
+    listReleases().then(setReleases, (err: Error) => setError(err.message));
+  }, []);
+
+  return (
+    <div className="flex flex-col gap-4">
+      <h2 className="text-lg font-semibold tracking-tight">Branches &amp; Releases</h2>
+      {error !== null && <p className={alertError}>Error: {error}</p>}
+      <section className={`${card} flex flex-col gap-3 p-4`}>
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          Branches
+        </h3>
+        {branches === null ? (
+          <p className={mutedCenter}>Loading…</p>
+        ) : branches.length === 0 ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400">No branch-scoped runs yet.</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {branches.map((id) => (
+              <button key={id} onClick={() => onSelectBranch(id)} className={btnSecondary}>
+                {id}
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+      <section className={`${card} flex flex-col gap-3 p-4`}>
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          Releases
+        </h3>
+        {releases === null ? (
+          <p className={mutedCenter}>Loading…</p>
+        ) : releases.length === 0 ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400">No releases yet.</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {releases.map((release) => (
+              <button
+                key={release.id}
+                onClick={() => onSelectRelease(release.id)}
+                className={btnSecondary}
               >
-                {run.status}
-              </span>
-              <span className="flex-1">
-                Run #{buildNumber} — {formatRunDate(run.createdAt)} — {run.snapshotCount} snapshots
-              </span>
-              {(run.newCount > 0 || run.removedCount > 0) && (
-                <span className="shrink-0 text-xs text-slate-400 dark:text-slate-500">
-                  {run.newCount > 0 ? `+${run.newCount} new` : null}
-                  {run.newCount > 0 && run.removedCount > 0 ? ", " : null}
-                  {run.removedCount > 0 ? `-${run.removedCount} missing` : null}
-                </span>
-              )}
-            </button>
-          </li>
-        );
-      })}
-    </ul>
+                {release.id} — {formatRunDate(release.createdAt)}
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
   );
 }
 

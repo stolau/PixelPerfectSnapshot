@@ -201,6 +201,7 @@ test("run list hides the new/removed summary when both counts are zero", async (
         {
           id: "run-3",
           createdAt: "2026-07-16T10:00:00Z",
+          scope: null,
           snapshotCount: 1,
           status: "pass",
           newCount: 0,
@@ -222,6 +223,113 @@ test("run list shows an empty-state message when there are no runs", async () =>
 
   await screen.findByText("No runs yet.");
   expect(screen.queryAllByRole("listitem").length).toBe(0);
+});
+
+test("run list shows a scope tag for branch/release runs but not master runs", async () => {
+  routes["GET /api/runs"] = {
+    body: {
+      runs: [
+        {
+          id: "run-b",
+          createdAt: "2026-07-16T10:00:00Z",
+          scope: { kind: "branch", id: "feature-x" },
+          snapshotCount: 1,
+          status: "pass",
+          newCount: 0,
+          removedCount: 0,
+        },
+        {
+          id: "run-m",
+          createdAt: "2026-07-15T10:00:00Z",
+          scope: null,
+          snapshotCount: 1,
+          status: "pass",
+          newCount: 0,
+          removedCount: 0,
+        },
+      ],
+    },
+  };
+  render(<App />);
+  await screen.findByText(/Jul 16, 10:00/);
+
+  const items = screen.getAllByRole("listitem");
+  expect(items[0].textContent).toContain("branch: feature-x");
+  expect(items[1].textContent).not.toContain("branch:");
+  expect(items[1].textContent).not.toContain("release:");
+});
+
+test("Branches & Releases: lists branches/releases, empty states, and filters the run list on click", async () => {
+  routes["GET /api/runs"] = {
+    body: {
+      runs: [
+        {
+          id: "run-c",
+          createdAt: "2026-07-17T10:00:00Z",
+          scope: { kind: "branch", id: "feature-x" },
+          snapshotCount: 1,
+          status: "pass",
+          newCount: 0,
+          removedCount: 0,
+        },
+        {
+          id: "run-b",
+          createdAt: "2026-07-16T10:00:00Z",
+          scope: null,
+          snapshotCount: 1,
+          status: "pass",
+          newCount: 0,
+          removedCount: 0,
+        },
+        {
+          id: "run-a",
+          createdAt: "2026-07-15T10:00:00Z",
+          scope: { kind: "release", id: "v1" },
+          snapshotCount: 1,
+          status: "pass",
+          newCount: 0,
+          removedCount: 0,
+        },
+      ],
+    },
+  };
+  routes["GET /api/branches"] = { body: { branches: ["feature-x"] } };
+  routes["GET /api/releases"] = {
+    body: { releases: [{ id: "v1", createdAt: "2026-07-10T09:00:00Z" }] },
+  };
+  render(<App />);
+  await screen.findByText(/Jul 17, 10:00/);
+
+  fireEvent.click(screen.getByRole("button", { name: "Branches & Releases" }));
+  await screen.findByRole("heading", { name: "Branches & Releases" });
+  expect(await screen.findByRole("button", { name: "feature-x" })).toBeDefined();
+  expect(
+    await screen.findByRole("button", { name: /v1 — Jul 10, 09:00/ }),
+  ).toBeDefined();
+
+  fireEvent.click(screen.getByRole("button", { name: "feature-x" }));
+
+  await screen.findByRole("heading", { name: "Branch: feature-x" });
+  const items = screen.getAllByRole("listitem");
+  expect(items.length).toBe(1);
+  // The filtered run keeps its TRUE global build number (#3, oldest-first across all 3 runs),
+  // not a renumbered #1 local to the one-item filtered subset.
+  expect(items[0].textContent).toContain("Run #3");
+
+  fireEvent.click(screen.getByRole("button", { name: "Back" }));
+  await screen.findByRole("heading", { name: "Branches & Releases" });
+});
+
+test("Branches & Releases shows empty states when nothing exists yet", async () => {
+  routes["GET /api/branches"] = { body: { branches: [] } };
+  routes["GET /api/releases"] = { body: { releases: [] } };
+  render(<App />);
+  await screen.findByText(/Jul 15, 09:30/);
+
+  fireEvent.click(screen.getByRole("button", { name: "Branches & Releases" }));
+
+  await screen.findByText("No branch-scoped runs yet.");
+  expect(screen.getByText("No releases yet.")).toBeDefined();
 });
 
 test("run detail renders each snapshot's name and status", async () => {
