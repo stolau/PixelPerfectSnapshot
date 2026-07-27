@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { createRequire } from "node:module";
 import type { AddressInfo } from "node:net";
@@ -678,6 +678,437 @@ test(
     expect(await approveButton.isDisabled()).toBe(true);
 
     await context.close();
+  },
+  240_000,
+);
+
+test(
+  "masks: deleting via the hashtag chip removes it, not just the on-image rect",
+  async () => {
+    if (serverUrl === "") throw new Error("the pipeline test must run (and pass) first");
+    if (viewerUrl === "") throw new Error("the viewer test must run (and pass) first");
+
+    const chipDeleteRunId = (await createRun({ serverUrl })).id;
+    await sendSnapshots([await capturePage(siteUrl, undefined, "chip-delete-page")], {
+      serverUrl,
+      runId: chipDeleteRunId,
+    });
+    await processRun({ serverUrl, runId: chipDeleteRunId });
+
+    const context = await browser!.newContext({ viewport: { width: 1200, height: 700 } });
+    const page = await context.newPage();
+    await page.goto(viewerUrl, { waitUntil: "load" });
+
+    const runButtons = page.locator("ul li button");
+    await runButtons.first().waitFor();
+    await runButtons.first().click();
+    const chipDeleteSnapshot = page.getByRole("button", { name: /^chip-delete-page/ });
+    await chipDeleteSnapshot.waitFor();
+    await chipDeleteSnapshot.click();
+    await page.getByText("Status: approved-baseline-missing").waitFor();
+
+    const overlay = page.getByTestId("mask-overlay");
+    await page.waitForFunction(() => {
+      const img = document.querySelector<HTMLImageElement>('img[alt="candidate"]');
+      return img !== null && img.naturalWidth > 0;
+    });
+    const box = await overlay.boundingBox();
+    if (box === null) throw new Error("mask overlay not visible");
+    await page.mouse.move(box.x + 20, box.y + 20);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 100, box.y + 80);
+    await page.mouse.up();
+    await page.getByTestId("mask-scope-picker").waitFor();
+    await page.getByRole("button", { name: "Save as global mask" }).click();
+    await page.getByTestId("mask-rect").waitFor();
+    await page.getByText("#global").waitFor();
+
+    await page.getByRole("button", { name: "Remove global mask" }).click();
+    await page.waitForFunction(() => document.querySelector('[data-testid="mask-rect"]') === null);
+    expect(await page.getByTestId("mask-rect").count()).toBe(0);
+    expect(await page.getByText("#global").count()).toBe(0);
+
+    await context.close();
+  },
+  240_000,
+);
+
+test(
+  "Single view's Baseline tab is disabled when there is no baseline, verified against a real rendered button",
+  async () => {
+    if (serverUrl === "") throw new Error("the pipeline test must run (and pass) first");
+    if (viewerUrl === "") throw new Error("the viewer test must run (and pass) first");
+
+    const noBaselineRunId = (await createRun({ serverUrl })).id;
+    await sendSnapshots([await capturePage(siteUrl, undefined, "no-baseline-page")], {
+      serverUrl,
+      runId: noBaselineRunId,
+    });
+    await processRun({ serverUrl, runId: noBaselineRunId });
+
+    const context = await browser!.newContext({ viewport: { width: 1200, height: 700 } });
+    const page = await context.newPage();
+    await page.goto(viewerUrl, { waitUntil: "load" });
+
+    const runButtons = page.locator("ul li button");
+    await runButtons.first().waitFor();
+    await runButtons.first().click();
+    const noBaselineSnapshot = page.getByRole("button", { name: /^no-baseline-page/ });
+    await noBaselineSnapshot.waitFor();
+    await noBaselineSnapshot.click();
+    await page.getByText("Status: approved-baseline-missing").waitFor();
+
+    await page.getByRole("button", { name: "Single" }).click();
+    // jsdom (the unit-test environment) can't render real interactivity, so this is the only
+    // place "disabled" is proven against an actual rendered <button>, mirroring the same proof
+    // already established for the Approve checkmark above.
+    const baselineTab = page.getByRole("button", { name: "Baseline" });
+    await baselineTab.waitFor();
+    expect(await baselineTab.isDisabled()).toBe(true);
+
+    await context.close();
+  },
+  240_000,
+);
+
+test(
+  "images fill the available width of their pane in both Dual and Single view",
+  async () => {
+    if (serverUrl === "") throw new Error("the pipeline test must run (and pass) first");
+    if (viewerUrl === "") throw new Error("the viewer test must run (and pass) first");
+
+    const widthRunId = (await createRun({ serverUrl })).id;
+    await sendSnapshots([await capturePage(siteUrl, undefined, "width-page")], {
+      serverUrl,
+      runId: widthRunId,
+    });
+    await processRun({ serverUrl, runId: widthRunId });
+    await fetch(`${serverUrl}/api/runs/${widthRunId}/snapshots/width-page/approve`, {
+      method: "POST",
+    });
+
+    const context = await browser!.newContext({ viewport: { width: 1400, height: 800 } });
+    const page = await context.newPage();
+    await page.goto(viewerUrl, { waitUntil: "load" });
+
+    const runButtons = page.locator("ul li button");
+    await runButtons.first().waitFor();
+    await runButtons.first().click();
+    const widthSnapshot = page.getByRole("button", { name: /^width-page/ });
+    await widthSnapshot.waitFor();
+    await widthSnapshot.click();
+    await page.getByText("Status: pass").waitFor();
+    await page.waitForFunction(() => {
+      const img = document.querySelector<HTMLImageElement>('img[alt="candidate"]');
+      return img !== null && img.naturalWidth > 0;
+    });
+
+    // Dual view: each pane should fill its own container, not shrink to the snapshot's own
+    // 480px natural capture width -- the exact bug the redesign's Dockerfile/CSS fix
+    // (InteractiveImagePane's wrapper going from inline-block to w-full) guarded against,
+    // previously only confirmed by eye via manual Docker screenshots, never asserted here.
+    // Proven two ways rather than "wider than 480px": the page's own intentional max-w-5xl cap
+    // (unrelated to this fix, not something this test should second-guess) means two side-by-side
+    // panes can legitimately end up *narrower* than the 480px capture regardless of browser
+    // width -- so the real signal is (a) the image exactly matches its own overlay's measured
+    // width, and (b) both panes end up sized equally, since a regression would leave one image
+    // stuck at its intrinsic pixel size while its sibling correctly fills available space.
+    const overlay = page.getByTestId("mask-overlay");
+    const overlayBox = await overlay.boundingBox();
+    const candidateImg = page.locator('img[alt="candidate"]');
+    const dualCandidateBox = await candidateImg.boundingBox();
+    if (overlayBox === null || dualCandidateBox === null) throw new Error("image not visible");
+    expect(Math.abs(dualCandidateBox.width - overlayBox.width)).toBeLessThan(2);
+
+    const baselineBox = await page.locator('img[alt="baseline"]').boundingBox();
+    if (baselineBox === null) throw new Error("baseline image not visible");
+    // The baseline pane's own wrapper has a p-2 padding the candidate pane's overlay doesn't
+    // (16px total) -- a real, structural difference, not a bug, so the tolerance accounts for
+    // it explicitly rather than being an arbitrarily loose number.
+    expect(Math.abs(baselineBox.width - dualCandidateBox.width)).toBeLessThan(20);
+
+    // Single view gives the one visible pane the full content column, with no sibling pane left
+    // to share space with -- here it should clearly exceed the 480px natural capture width. This
+    // is the strongest direct proof against the regression: pre-fix, the image would stay stuck
+    // at 480px (or smaller) no matter how much room Single view actually gave it.
+    await page.getByRole("button", { name: "Single" }).click();
+    await page.waitForFunction(() => {
+      const img = document.querySelector<HTMLImageElement>('img[alt="candidate"]');
+      return img !== null && img.naturalWidth > 0;
+    });
+    const singleCandidateBox = await candidateImg.boundingBox();
+    if (singleCandidateBox === null) throw new Error("image not visible in single view");
+    expect(singleCandidateBox.width).toBeGreaterThan(WIDTH);
+    expect(singleCandidateBox.width).toBeGreaterThan(dualCandidateBox.width);
+
+    await context.close();
+  },
+  240_000,
+);
+
+test(
+  "category management: deletion is refused while a snapshot is still tagged with it",
+  async () => {
+    if (serverUrl === "") throw new Error("the pipeline test must run (and pass) first");
+    if (viewerUrl === "") throw new Error("the viewer test must run (and pass) first");
+
+    const deleteCatRunId = (await createRun({ serverUrl })).id;
+    await sendSnapshots([await capturePage(siteUrl, undefined, "delete-category-page")], {
+      serverUrl,
+      runId: deleteCatRunId,
+    });
+    await processRun({ serverUrl, runId: deleteCatRunId });
+    await fetch(
+      `${serverUrl}/api/runs/${deleteCatRunId}/snapshots/delete-category-page/approve`,
+      { method: "POST" },
+    );
+
+    const context = await browser!.newContext({ viewport: { width: 1200, height: 700 } });
+    const page = await context.newPage();
+    await page.goto(viewerUrl, { waitUntil: "load" });
+
+    const runButtons = page.locator("ul li button");
+    await runButtons.first().waitFor();
+    await runButtons.first().click();
+    const deleteCatSnapshot = page.getByRole("button", { name: /^delete-category-page/ });
+    await deleteCatSnapshot.waitFor();
+    await deleteCatSnapshot.click();
+    await page.getByText("Status: pass").waitFor();
+
+    const overlay = page.getByTestId("mask-overlay");
+    await page.waitForFunction(() => {
+      const img = document.querySelector<HTMLImageElement>('img[alt="candidate"]');
+      return img !== null && img.naturalWidth > 0;
+    });
+    const box = await overlay.boundingBox();
+    if (box === null) throw new Error("mask overlay not visible");
+    await page.mouse.move(box.x + 20, box.y + 20);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 100, box.y + 80);
+    await page.mouse.up();
+    await page.getByTestId("mask-scope-picker").waitFor();
+    await page.getByRole("button", { name: "+ New category" }).click();
+    await page.getByLabel("New category name").fill("E2E Delete Refusal");
+    await page.getByRole("button", { name: "Create & apply" }).click();
+    await page.getByTestId("mask-scope-picker").waitFor({ state: "detached" });
+    await page.getByText("E2E Delete Refusal (1)").waitFor();
+
+    await page.getByRole("button", { name: "Settings" }).click();
+    const categoryLabel = page.getByText("E2E Delete Refusal — 1 snapshots, 1 masks");
+    await categoryLabel.waitFor();
+    // Scope to this category's own row -- Settings may list other categories accumulated from
+    // earlier tests against this same shared backend, each with its own "Delete" button.
+    const categoryRow = categoryLabel.locator("xpath=..");
+    await categoryRow.getByRole("button", { name: "Delete" }).click();
+    await page.getByText(/Delete failed/).waitFor();
+    // Still listed -- the refusal didn't remove it.
+    await categoryLabel.waitFor();
+
+    await context.close();
+  },
+  240_000,
+);
+
+test(
+  "bulk approve reports a genuine partial failure, not a simulated one",
+  async () => {
+    if (serverUrl === "") throw new Error("the pipeline test must run (and pass) first");
+    if (viewerUrl === "") throw new Error("the viewer test must run (and pass) first");
+    if (dataDir === undefined) throw new Error("the pipeline test must run (and pass) first");
+
+    const partialRunId = (await createRun({ serverUrl })).id;
+    await sendSnapshots(
+      [
+        await capturePage(siteUrl, undefined, "partial-page-a"),
+        await capturePage(siteUrl, undefined, "partial-page-b"),
+      ],
+      { serverUrl, runId: partialRunId },
+    );
+    await processRun({ serverUrl, runId: partialRunId });
+
+    // Delete one candidate image directly from disk -- a real, not simulated, failure: the
+    // backend's approve endpoint genuinely 409s with "no candidate image exists yet" when this
+    // happens (backend/app/api.py's approve_snapshot). Which of the two snapshots this hits
+    // doesn't matter for the assertions below, only that exactly one of the two calls fails.
+    const imagesDir = path.join(dataDir, "images", partialRunId);
+    const snapshotDirs = readdirSync(imagesDir);
+    expect(snapshotDirs.length).toBe(2);
+    rmSync(path.join(imagesDir, snapshotDirs[0], "candidate.png"));
+
+    const context = await browser!.newContext({ viewport: { width: 1200, height: 700 } });
+    const page = await context.newPage();
+    await page.goto(viewerUrl, { waitUntil: "load" });
+
+    const runButtons = page.locator("ul li button");
+    await runButtons.first().waitFor();
+    await runButtons.first().click();
+
+    await page.getByLabel("Select partial-page-a").check();
+    await page.getByLabel("Select partial-page-b").check();
+    await page.getByRole("button", { name: "Approve selected (2)" }).click();
+    await page.getByText("1 approved, 1 failed").waitFor();
+
+    const passRows = await page.getByText(/^partial-page-[ab] — .* — pass$/).count();
+    const stillMissingRows = await page
+      .getByText(/^partial-page-[ab] — .* — approved-baseline-missing$/)
+      .count();
+    expect(passRows).toBe(1);
+    expect(stillMissingRows).toBe(1);
+
+    await context.close();
+  },
+  240_000,
+);
+
+test(
+  "full pipeline with backend auth (PPS_API_TOKEN) turned on",
+  async () => {
+    if (siteUrl === "") throw new Error("the pipeline test must run (and pass) first");
+    if (!browser) throw new Error("the pipeline test must run (and pass) first");
+
+    // Fully self-contained: a second Flask process + viewer proxy, own data dir, own port,
+    // cleaned up locally in this test's own finally block -- doesn't touch the shared
+    // module-level serverUrl/viewerUrl/dataDir the other tests reuse, since introducing auth
+    // onto the shared backend would break every other (deliberately unauthenticated) test.
+    const authToken = "e2e-test-token";
+    const authDataDir = mkdtempSync(path.join(os.tmpdir(), "pps-e2e-auth-"));
+    const authPort = await freePort();
+    const authServerUrl = `http://127.0.0.1:${authPort}`;
+    const authFlaskEnv = { ...flaskEnv, PPS_DATA_DIR: authDataDir, PPS_API_TOKEN: authToken };
+    const authFlaskProc = spawn(flaskBin, ["--app", "app", "run", "--port", String(authPort)], {
+      cwd: backendDir,
+      env: authFlaskEnv,
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let authFlaskStderr = "";
+    authFlaskProc.stderr?.on("data", (chunk: Buffer) => (authFlaskStderr += chunk.toString()));
+    let authViewerServer: Server | undefined;
+
+    try {
+      const deadline = Date.now() + 30_000;
+      for (;;) {
+        if (authFlaskProc.exitCode !== null) {
+          throw new Error(
+            `auth flask exited with code ${authFlaskProc.exitCode}:\n${authFlaskStderr}`,
+          );
+        }
+        const ok = await fetch(`${authServerUrl}/api/health`).then((r) => r.ok, () => false);
+        if (ok) break;
+        if (Date.now() > deadline) {
+          throw new Error(`auth flask never became healthy:\n${authFlaskStderr}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+
+      // Confirmed real, not mocked: a request with no token is genuinely rejected.
+      const unauthedRes = await fetch(`${authServerUrl}/api/runs`);
+      expect(unauthedRes.status).toBe(401);
+
+      // packages/client's own token support -- capture/upload/process/approve all pass an
+      // explicit token, same as a real CI pipeline pointed at an auth-protected backend would.
+      const authRunId = (await createRun({ serverUrl: authServerUrl, token: authToken })).id;
+      await sendSnapshots([await capturePage(siteUrl, undefined, "auth-page")], {
+        serverUrl: authServerUrl,
+        runId: authRunId,
+        token: authToken,
+      });
+      await processRun({ serverUrl: authServerUrl, runId: authRunId, token: authToken });
+      const approveRes = await fetch(
+        `${authServerUrl}/api/runs/${authRunId}/snapshots/auth-page/approve`,
+        { method: "POST", headers: { Authorization: `Bearer ${authToken}` } },
+      );
+      expect(approveRes.status).toBe(200);
+
+      // Serve the already-built viewer, proxying /backend/* to THIS auth-protected backend --
+      // same forwarding pattern the shared viewer proxy (above) uses, just pointed elsewhere,
+      // and additionally forwarding the browser's own Authorization header through.
+      const viewerDist = fileURLToPath(new URL("../../viewer/dist", import.meta.url));
+      const vsrv = createServer((req, res) => {
+        const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
+        if (pathname.startsWith("/backend/")) {
+          const chunks: Buffer[] = [];
+          req.on("data", (chunk: Buffer) => chunks.push(chunk));
+          req.on("end", () => {
+            const contentType = req.headers["content-type"];
+            const authHeader = req.headers["authorization"];
+            fetch(`${authServerUrl}${pathname.slice("/backend".length)}`, {
+              method: req.method,
+              headers: {
+                ...(contentType ? { "Content-Type": contentType } : {}),
+                ...(authHeader ? { Authorization: authHeader as string } : {}),
+              },
+              body: chunks.length > 0 ? Buffer.concat(chunks) : undefined,
+            }).then(
+              async (upstream) => {
+                res.writeHead(upstream.status, {
+                  "Content-Type":
+                    upstream.headers.get("content-type") ?? "application/octet-stream",
+                });
+                res.end(Buffer.from(await upstream.arrayBuffer()));
+              },
+              () => {
+                res.writeHead(502);
+                res.end();
+              },
+            );
+          });
+          return;
+        }
+        const filePath = pathname === "/" ? "/index.html" : pathname;
+        let body: Buffer;
+        try {
+          body = readFileSync(path.join(viewerDist, filePath));
+        } catch {
+          res.writeHead(404);
+          res.end();
+          return;
+        }
+        res.writeHead(200, {
+          "Content-Type": MIME[path.extname(filePath)] ?? "application/octet-stream",
+        });
+        res.end(body);
+      });
+      authViewerServer = vsrv;
+      await new Promise<void>((resolve) => vsrv.listen(0, "127.0.0.1", resolve));
+      const authViewerUrl = `http://127.0.0.1:${(vsrv.address() as AddressInfo).port}`;
+
+      const context = await browser.newContext({ viewport: { width: 1200, height: 700 } });
+      const page = await context.newPage();
+
+      // Without a token set in the browser, the run list genuinely fails to load.
+      await page.goto(authViewerUrl, { waitUntil: "load" });
+      await page.getByText(/^Error:/).waitFor();
+
+      // Setting the token via Settings unlocks the real, live authenticated flow.
+      await page.getByRole("button", { name: "Settings" }).click();
+      await page.getByLabel("Auth token").fill(authToken);
+      await page.getByRole("button", { name: "Save token" }).click();
+      await page.reload({ waitUntil: "load" });
+
+      const runButtons = page.locator("ul li button");
+      await runButtons.first().waitFor();
+      await runButtons.first().click();
+      const authSnapshot = page.getByRole("button", { name: /^auth-page/ });
+      await authSnapshot.waitFor();
+      await authSnapshot.click();
+      await page.getByText("Status: pass").waitFor();
+      await page.waitForFunction(() => {
+        const img = document.querySelector<HTMLImageElement>('img[alt="baseline"]');
+        return img !== null && img.naturalWidth > 0;
+      });
+
+      await context.close();
+    } finally {
+      if (authFlaskProc.exitCode === null) {
+        authFlaskProc.kill("SIGTERM");
+        await once(authFlaskProc, "exit");
+      }
+      if (authViewerServer?.listening) {
+        authViewerServer.closeAllConnections();
+        await new Promise<void>((resolve) => authViewerServer?.close(() => resolve()));
+      }
+      rmSync(authDataDir, { recursive: true, force: true });
+    }
   },
   240_000,
 );
