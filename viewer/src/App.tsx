@@ -38,8 +38,6 @@ import type {
 import { AuthenticatedImage } from "./AuthenticatedImage.js";
 import { getAuthToken, setAuthToken } from "./authToken.js";
 import { categoryColor } from "./categoryColor.js";
-import { getImageSize, imageSizePx, setImageSize } from "./imageDisplaySize.js";
-import type { ImageSize } from "./imageDisplaySize.js";
 
 interface ScopeFilter {
   kind: "branch" | "release";
@@ -207,16 +205,6 @@ function SettingsView() {
       </section>
       <section className={`${card} flex flex-col gap-3 p-4`}>
         <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-          Image display size
-        </h3>
-        <p className="text-sm text-slate-500 dark:text-slate-400">
-          One shared size for every baseline/candidate/diff image, regardless of each snapshot's
-          own captured viewport.
-        </p>
-        <ImageSizeInput />
-      </section>
-      <section className={`${card} flex flex-col gap-3 p-4`}>
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
           Categories
         </h3>
         <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -325,30 +313,6 @@ function CategoriesSection() {
         );
       })}
       {actionError !== null && <p className={alertError}>{actionError}</p>}
-    </div>
-  );
-}
-
-function ImageSizeInput() {
-  const [size, setSize] = useState<ImageSize>(() => getImageSize());
-
-  function choose(next: ImageSize) {
-    setImageSize(next);
-    setSize(next);
-  }
-
-  return (
-    <div className="flex gap-2">
-      {(["small", "medium", "large"] as const).map((option) => (
-        <button
-          key={option}
-          onClick={() => choose(option)}
-          aria-pressed={size === option}
-          className={size === option ? btnPrimary : btnSecondary}
-        >
-          {option[0].toUpperCase() + option.slice(1)}
-        </button>
-      ))}
     </div>
   );
 }
@@ -846,7 +810,6 @@ function MaskAssignmentMenu({
 function InteractiveImagePane({
   src,
   alt,
-  widthPx,
   overlayRef,
   onMouseDown,
   onMouseMove,
@@ -864,7 +827,6 @@ function InteractiveImagePane({
 }: {
   src: string;
   alt: string;
-  widthPx: number;
   overlayRef: React.RefObject<HTMLDivElement>;
   onMouseDown: (e: React.MouseEvent<HTMLDivElement>) => void;
   onMouseMove: (e: React.MouseEvent<HTMLDivElement>) => void;
@@ -891,7 +853,7 @@ function InteractiveImagePane({
     <div
       ref={overlayRef}
       data-testid="mask-overlay"
-      className="relative inline-block select-none rounded-md bg-slate-100 dark:bg-slate-800"
+      className="relative w-full select-none rounded-md bg-slate-100 dark:bg-slate-800"
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
       onMouseUp={onMouseUp}
@@ -900,8 +862,7 @@ function InteractiveImagePane({
         src={src}
         alt={alt}
         draggable={false}
-        style={{ width: widthPx }}
-        className="mx-auto h-auto rounded"
+        className="h-auto w-full rounded"
         onLoad={(e) => {
           const img = e.currentTarget;
           onImageLoad({ width: img.naturalWidth, height: img.naturalHeight });
@@ -982,8 +943,6 @@ function SnapshotDetail({
   const [createdMasks, setCreatedMasks] = useState<
     { scope: MaskScope; id: number; x: number; y: number; width: number; height: number }[]
   >([]);
-  const [categoryInput, setCategoryInput] = useState("");
-  const [categoryError, setCategoryError] = useState<string | null>(null);
   const [drawStart, setDrawStart] = useState<{ x: number; y: number } | null>(null);
   const [drawCurrent, setDrawCurrent] = useState<{ x: number; y: number } | null>(null);
   const [pendingRect, setPendingRect] = useState<{
@@ -999,17 +958,10 @@ function SnapshotDetail({
   const [viewMode, setViewMode] = useState<"dual" | "single">("dual");
   const [showDiff, setShowDiff] = useState(false);
   const [singleTab, setSingleTab] = useState<"baseline" | "candidate">("candidate");
-  const [imageWidthPx] = useState(() => imageSizePx(getImageSize()));
   const overlayRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    getSnapshot(runId, name).then(
-      (detail) => {
-        setSnapshot(detail);
-        setCategoryInput(detail.category ?? "");
-      },
-      (err: Error) => setError(err.message),
-    );
+    getSnapshot(runId, name).then(setSnapshot, (err: Error) => setError(err.message));
   }, [runId, name]);
 
   useEffect(() => {
@@ -1097,7 +1049,6 @@ function SnapshotDetail({
       if (snapshot !== null && snapshot.category !== category) {
         await updateSnapshotCategory(runId, name, category);
         setSnapshot((prev) => (prev !== null ? { ...prev, category } : prev));
-        setCategoryInput(category);
       }
       const response = await createCategoryMask(category, pendingRect);
       setCreatedMasks((prev) => [...prev, { scope: "category", ...response }]);
@@ -1132,21 +1083,6 @@ function SnapshotDetail({
         setMasksError(`Delete mask failed (${err.status}): ${err.message}`);
       } else {
         setMasksError(`Delete mask failed: ${(err as Error).message}`);
-      }
-    }
-  }
-
-  async function saveCategory() {
-    setCategoryError(null);
-    const value = categoryInput.trim() === "" ? null : categoryInput.trim();
-    try {
-      await updateSnapshotCategory(runId, name, value);
-      setSnapshot((prev) => (prev !== null ? { ...prev, category: value } : prev));
-    } catch (err) {
-      if (err instanceof ApiError) {
-        setCategoryError(`Save category failed (${err.status}): ${err.message}`);
-      } else {
-        setCategoryError(`Save category failed: ${(err as Error).message}`);
       }
     }
   }
@@ -1221,28 +1157,6 @@ function SnapshotDetail({
       {error === null && snapshot === null && <p className={mutedCenter}>Loading…</p>}
       {snapshot !== null && statusPill !== null && (
         <>
-          <div className="flex flex-wrap items-center gap-3">
-            <p
-              className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-sm font-medium ${statusPill.pill}`}
-            >
-              Status: {snapshot.status}
-            </p>
-            <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
-              Category
-              <input
-                type="text"
-                value={categoryInput}
-                onChange={(e) => setCategoryInput(e.target.value)}
-                aria-label="Category"
-                className="w-40 rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 focus:border-slate-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-              />
-            </label>
-            <button onClick={saveCategory} className={`${btnGhost} px-2 py-1 text-xs`}>
-              Save category
-            </button>
-          </div>
-          {categoryError !== null && <p className={alertError}>{categoryError}</p>}
-
           {(() => {
             const candidateSrc = showDiff ? snapshot.diffUrl : snapshot.candidateUrl;
             const candidateLabel = showDiff ? "diff" : "candidate";
@@ -1253,8 +1167,7 @@ function SnapshotDetail({
                     <AuthenticatedImage
                       src={imageUrl(snapshot.baselineUrl)}
                       alt="baseline"
-                      style={{ width: imageWidthPx }}
-                      className="h-auto rounded"
+                      className="h-auto w-full rounded"
                     />
                   </div>
                 ) : (
@@ -1270,7 +1183,6 @@ function SnapshotDetail({
                   <InteractiveImagePane
                     src={imageUrl(candidateSrc)}
                     alt={candidateLabel}
-                    widthPx={imageWidthPx}
                     overlayRef={overlayRef}
                     onMouseDown={handleMouseDown}
                     onMouseMove={handleMouseMove}
@@ -1295,91 +1207,95 @@ function SnapshotDetail({
             );
             return (
               <>
-                <div className="flex flex-wrap items-center justify-center gap-3">
-                  <div
-                    role="group"
-                    aria-label="View mode"
-                    className="inline-flex overflow-hidden rounded-md border border-slate-300 dark:border-slate-700"
-                  >
-                    {(["dual", "single"] as const).map((mode) => (
-                      <button
-                        key={mode}
-                        onClick={() => setViewMode(mode)}
-                        aria-pressed={viewMode === mode}
-                        className={
-                          viewMode === mode
-                            ? "bg-slate-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-slate-100 dark:text-slate-900"
-                            : "bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                        }
-                      >
-                        {mode === "dual" ? "Dual" : "Single"}
-                      </button>
-                    ))}
-                  </div>
-                  <label className="flex items-center gap-1.5 text-sm text-slate-600 dark:text-slate-300">
-                    <input
-                      type="checkbox"
-                      checked={showDiff}
-                      onChange={(e) => setShowDiff(e.target.checked)}
-                    />
-                    Show diff
-                  </label>
-                  {viewMode === "single" && (
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <p
+                      className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-sm font-medium ${statusPill.pill}`}
+                    >
+                      Status: {snapshot.status}
+                    </p>
                     <div
                       role="group"
-                      aria-label="Single view image"
+                      aria-label="View mode"
                       className="inline-flex overflow-hidden rounded-md border border-slate-300 dark:border-slate-700"
                     >
-                      <button
-                        onClick={() => setSingleTab("baseline")}
-                        aria-pressed={singleTab === "baseline"}
-                        className={
-                          singleTab === "baseline"
-                            ? "bg-slate-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-slate-100 dark:text-slate-900"
-                            : "bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                        }
-                      >
-                        Baseline
-                      </button>
-                      <button
-                        onClick={() => setSingleTab("candidate")}
-                        aria-pressed={singleTab === "candidate"}
-                        className={
-                          singleTab === "candidate"
-                            ? "bg-slate-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-slate-100 dark:text-slate-900"
-                            : "bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                        }
-                      >
-                        {showDiff ? "Diff" : "Candidate"}
-                      </button>
+                      {(["dual", "single"] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          onClick={() => setViewMode(mode)}
+                          aria-pressed={viewMode === mode}
+                          className={
+                            viewMode === mode
+                              ? "bg-slate-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-slate-100 dark:text-slate-900"
+                              : "bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                          }
+                        >
+                          {mode === "dual" ? "Dual" : "Single"}
+                        </button>
+                      ))}
                     </div>
-                  )}
-                </div>
-                <div className="flex justify-center">
-                  <div className="relative">
-                    {viewMode === "dual" ? (
-                      <div className="flex flex-wrap justify-center gap-4">
-                        {baselinePane}
-                        {candidatePane}
+                    <label className="flex items-center gap-1.5 text-sm text-slate-600 dark:text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={showDiff}
+                        onChange={(e) => setShowDiff(e.target.checked)}
+                      />
+                      Show diff
+                    </label>
+                    {viewMode === "single" && (
+                      <div
+                        role="group"
+                        aria-label="Single view image"
+                        className="inline-flex overflow-hidden rounded-md border border-slate-300 dark:border-slate-700"
+                      >
+                        <button
+                          onClick={() => setSingleTab("baseline")}
+                          disabled={snapshot.baselineUrl === null}
+                          aria-pressed={singleTab === "baseline"}
+                          className={
+                            singleTab === "baseline"
+                              ? "bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
+                              : "bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 dark:disabled:hover:bg-slate-900"
+                          }
+                        >
+                          Baseline
+                        </button>
+                        <button
+                          onClick={() => setSingleTab("candidate")}
+                          aria-pressed={singleTab === "candidate"}
+                          className={
+                            singleTab === "candidate"
+                              ? "bg-slate-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-slate-100 dark:text-slate-900"
+                              : "bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                          }
+                        >
+                          {showDiff ? "Diff" : "Candidate"}
+                        </button>
                       </div>
-                    ) : singleTab === "baseline" ? (
-                      baselinePane
-                    ) : (
-                      candidatePane
                     )}
-                    <button
-                      onClick={approve}
-                      disabled={approveDisabled}
-                      aria-label="Approve"
-                      title={`Approve (status: ${snapshot.status})`}
-                      className={`absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full text-base font-bold leading-none text-white shadow-sm transition-opacity ${statusPill.dot} ${
-                        approveDisabled ? "cursor-not-allowed opacity-50" : "hover:opacity-90"
-                      }`}
-                    >
-                      ✓
-                    </button>
                   </div>
+                  <button
+                    onClick={approve}
+                    disabled={approveDisabled}
+                    aria-label="Approve"
+                    title={`Approve (status: ${snapshot.status})`}
+                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-base font-bold leading-none text-white shadow-sm transition-opacity ${statusPill.dot} ${
+                      approveDisabled ? "cursor-not-allowed opacity-50" : "hover:opacity-90"
+                    }`}
+                  >
+                    ✓
+                  </button>
                 </div>
+                {viewMode === "dual" ? (
+                  <div className="flex flex-wrap gap-4">
+                    <div className="min-w-0 flex-1">{baselinePane}</div>
+                    <div className="min-w-0 flex-1">{candidatePane}</div>
+                  </div>
+                ) : singleTab === "baseline" ? (
+                  baselinePane
+                ) : (
+                  candidatePane
+                )}
               </>
             );
           })()}
@@ -1391,30 +1307,51 @@ function SnapshotDetail({
             </h2>
             {masks !== null && masks.length > 0 && (
               <div className="flex flex-wrap gap-2">
-                {masks.map((_rect, i) => {
-                  const binding = maskBindings[i] ?? null;
-                  const scope = maskChipScope(binding);
-                  const label = maskChipLabel(scope, snapshot.category);
-                  const dot = maskChipDot(scope, snapshot.category);
-                  return (
-                    <span
-                      key={i}
-                      className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                    >
-                      <span className={`h-2 w-2 rounded-full ${dot}`} />
-                      #{label}
-                      {binding !== null && (
-                        <button
-                          aria-label={`Remove ${label} mask`}
-                          onClick={() => deleteMask(binding.scope, binding.id)}
-                          className="ml-0.5 leading-none text-slate-400 hover:text-red-600 dark:text-slate-500"
-                        >
-                          ×
-                        </button>
-                      )}
-                    </span>
-                  );
-                })}
+                {(() => {
+                  let categoryCount = 0;
+                  const chips = masks.flatMap((_rect, i) => {
+                    const binding = maskBindings[i] ?? null;
+                    const scope = maskChipScope(binding);
+                    if (scope === "category") {
+                      categoryCount++;
+                      return [];
+                    }
+                    const label = maskChipLabel(scope, snapshot.category);
+                    const dot = maskChipDot(scope, snapshot.category);
+                    return [
+                      <span
+                        key={i}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                      >
+                        <span className={`h-2 w-2 rounded-full ${dot}`} />
+                        #{label}
+                        {binding !== null && (
+                          <button
+                            aria-label={`Remove ${label} mask`}
+                            onClick={() => deleteMask(binding.scope, binding.id)}
+                            className="ml-0.5 leading-none text-slate-400 hover:text-red-600 dark:text-slate-500"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </span>,
+                    ];
+                  });
+                  if (categoryCount > 0 && snapshot.category !== null) {
+                    chips.push(
+                      <span
+                        key="category"
+                        className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                      >
+                        <span
+                          className={`h-2 w-2 rounded-full ${maskChipDot("category", snapshot.category)}`}
+                        />
+                        {snapshot.category} ({categoryCount})
+                      </span>,
+                    );
+                  }
+                  return chips;
+                })()}
               </div>
             )}
             {pendingRect !== null && (

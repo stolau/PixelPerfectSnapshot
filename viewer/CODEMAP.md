@@ -11,8 +11,7 @@ Consumes the backend HTTP API (`docs/API.md`).
   return to the run list; "Branches & Releases" and "Settings" links, each highlighted when
   active) plus state-based views — run list → run detail → snapshot detail, a standalone
   `Settings` view holding `AuthTokenInput` (shows the currently stored auth token, if any, in a
-  password field with "Save token" / "Clear token" buttons wired to `setAuthToken()`),
-  `ImageSizeInput` (Small/Medium/Large buttons wired to `imageDisplaySize.ts`'s `setImageSize()`),
+  password field with "Save token" / "Clear token" buttons wired to `setAuthToken()`)
   and `CategoriesSection` (one row per category from `listCategories()` — a `categoryColor()` dot,
   name, "N snapshots, M masks" counts, inline Rename [text input + Save/Cancel, mirroring
   `MaskAssignmentMenu`'s "+ New category" field], and Delete; both actions refetch the list on
@@ -59,34 +58,41 @@ Consumes the backend HTTP API (`docs/API.md`).
   (`scoped_baseline_read_path()`), so `RunDetail`/`SnapshotDetail` needed zero changes to work
   correctly for scoped runs — this feature is purely about *getting to* the right runs.
 
-  **Snapshot detail** is laid out to keep the image itself the visual focus, with all chrome
-  reflowed tightly around it: a header line holds the status pill and an inline-editable
-  "Category" text field (empty string ↔ `null`, "Save category" PATCHes via
-  `updateSnapshotCategory()` and updates local state directly, no refetch); a single control line
-  directly above the image holds the Dual/Single toggle, "Show diff" checkbox, and (in Single mode
-  only) the Baseline/Candidate tabs; then the image(s) themselves. Approve is a small circular
-  checkmark button pinned to the top-right corner of the image area (covering both panes in Dual
-  view, not nested inside either one) rather than a full-width text button, colored via the same
-  `statusStyles(status).dot` used by the status pill — amber (`approved-baseline-missing`), red
-  (`fail`), green (`pass`), grey (`pending`/unknown) — and **disabled once `status === "pass"`**:
-  approving a passing snapshot is not actually a no-op server-side (`compare()`'s
-  `MAX_DIFF_RATIO` tolerates small drift, so a passing snapshot can still differ slightly from its
-  baseline, and approving would re-pin it), but the UI deliberately trades that drift-reset
-  capability away for a simpler "green = nothing to click" affordance — it's reachable only via a
-  raw API call once a snapshot is already passing. Below the image, a "Masks" hashtag-style chip
-  row (see below) and a collapsed-by-default `<details>` "History" section (thumbnails of prior
-  baselines, newest-first, fetched on mount and refetched after a successful approve, which itself
-  refetches the snapshot detail so status stays fresh).
+  **Snapshot detail** is laid out to keep the image itself the visual focus, as large as the
+  available width allows: a single top bar holds the status pill, the Dual/Single toggle, "Show
+  diff" checkbox, (in Single mode only) the Baseline/Candidate tabs — Baseline `disabled` when
+  `snapshot.baselineUrl === null`, so there's nothing to switch to — and, pushed to the far right
+  via `justify-between`, the Approve checkmark; the image(s) render directly below with no
+  positioned wrapper of their own. There is **no standalone Category field** — category membership
+  is visible and settable only through the mask-assignment flow (see below); this is a deliberate
+  choice, not an oversight (see the "Category ↔ masks" note below). Approve is a small circular
+  checkmark button, a plain flex item in the top bar (not absolutely positioned over the image, so
+  it can never overlap the actual pixels), colored via the same `statusStyles(status).dot` used by
+  the status pill — amber (`approved-baseline-missing`), red (`fail`), green (`pass`), grey
+  (`pending`/unknown) — and **disabled once `status === "pass"`**: approving a passing snapshot is
+  not actually a no-op server-side (`compare()`'s `MAX_DIFF_RATIO` tolerates small drift, so a
+  passing snapshot can still differ slightly from its baseline, and approving would re-pin it), but
+  the UI deliberately trades that drift-reset capability away for a simpler "green = nothing to
+  click" affordance — it's reachable only via a raw API call once a snapshot is already passing.
+  Below the image, a "Masks" hashtag-style chip row (see below) and a collapsed-by-default
+  `<details>` "History" section (thumbnails of prior baselines, newest-first, fetched on mount and
+  refetched after a successful approve, which itself refetches the snapshot detail so status stays
+  fresh).
 
-  Image display is **Dual** (baseline + candidate/diff side by side, the default) or **Single**
-  (one pane at a time via Baseline/Candidate tabs) — a "Show diff" checkbox swaps whichever pane is
-  in the "candidate slot" between `candidateUrl` and `diffUrl` (an image *swap*, not an
-  alpha-blended overlay, since the backend's diff PNG is opaque, not a transparency mask; see
-  `docs/API.md`). Both baseline and candidate/diff panes render at one shared width
-  (`imageDisplaySize.ts`'s `getImageSize()`/`imageSizePx()`, read once on mount — views fully
-  remount on navigation, so no live cross-view sync is needed) regardless of the snapshot's own
-  captured viewport, via a `style={{width}}` on the `<img>` (not `max-w-full`, which used to make
-  differently-sized snapshots render at different display sizes).
+  Image display is **Dual** (baseline + candidate/diff side by side, each pane `flex-1 min-w-0` so
+  they split the available width, the default) or **Single** (one pane at a time via
+  Baseline/Candidate tabs, naturally full width as a block element) — a "Show diff" checkbox swaps
+  whichever pane is in the "candidate slot" between `candidateUrl` and `diffUrl` (an image *swap*,
+  not an alpha-blended overlay, since the backend's diff PNG is opaque, not a transparency mask;
+  see `docs/API.md`). Both panes render responsively (`className="w-full h-auto"` on the `<img>`)
+  regardless of the snapshot's own captured viewport, filling whatever width their container gives
+  them — there is no fixed-size preference anymore (the old Settings "Image display size" control
+  and its `imageDisplaySize.ts` module were removed once this became their only consumer; see
+  below). `InteractiveImagePane`'s wrapping `overlayRef` div is deliberately `w-full` (not
+  `inline-block`, which was tried and found to shrink-wrap to the image's *intrinsic* size rather
+  than fill available width — a plain `inline-block` + percentage-width child resolves against an
+  indeterminate containing block) — `position: relative` is unaffected by that, so the mask
+  rects' `absolute` positioning against this same element still works correctly.
 
   The interactive (candidate-slot) pane is `InteractiveImagePane` — a presentational component
   (owns no state; `SnapshotDetail` owns all of `overlayRef`/`drawStart`/`drawCurrent`/`pendingRect`/
@@ -113,6 +119,15 @@ Consumes the backend HTTP API (`docs/API.md`).
   tag leaves the snapshot tagged with no mask yet) — a known, accepted, recoverable gap, not an
   oversight.
 
+  **Category ↔ masks.** `category` is one string column on a snapshot (`backend/app/db.py`) that
+  has always done double duty: a Settings label, and the scoping key for category masks. There is
+  no separate "general label" concept — a category's only real purpose is to be a mask-preset
+  name, so `applyCategory()` (above) is the **only** place category membership is ever set; there
+  is no standalone editable Category field anywhere in the UI. This also means there is currently
+  **no way to untag** a snapshot from a category short of deleting the category globally (which
+  itself requires no snapshot still be tagged with it) — a deliberate, author-confirmed tradeoff,
+  not an oversight, mirroring the earlier approve-on-`pass` tradeoff above.
+
   Delete is available only for masks whose id can be proven: global and category masks
   (cross-referenced against `GET /api/masks` / `GET /api/categories/<category>/masks`) and masks
   created in the current browser session (tracked client-side from their create response,
@@ -126,25 +141,27 @@ Consumes the backend HTTP API (`docs/API.md`).
 
   Applicable masks — previously visible **only** as overlay rectangles on the candidate image
   itself, with no indication anywhere else that a snapshot had any masks at all — now also render
-  as a row of Instagram-style hashtag chips below the image (`#global`, `#this image`, or the
-  category name), each with a colored dot: `categoryColor(name).dot` for category scope, two new
-  fixed constants (`MASK_SCOPE_DOT`) for global/per-image, since those two scopes have no name to
-  hash. A chip's binding is resolved the same way as its overlay rect (`resolveMaskIds()`, called a
-  second time in `SnapshotDetail` against the same inputs); a rect with no resolved binding is
-  inferred to be scope `"per-image"` by elimination (global/category pools are always fully
-  enumerated with ids, so an unmatched rect can't be either) and renders its chip with no remove
-  control, mirroring the overlay rect's own missing delete button exactly rather than introducing a
-  second, inconsistent notion of "unknown mask." All `<img>` sites (baseline, candidate/diff,
-  history thumbnails) render through `AuthenticatedImage` (see below) rather than plain `<img>`.
+  as a row of chips below the image. Global and per-image masks each get their own Instagram-style
+  hashtag chip (`#global`, `#this image`), colored via `MASK_SCOPE_DOT` (two fixed constants, since
+  neither scope has a name to hash) — a chip's binding is resolved the same way as its overlay rect
+  (`resolveMaskIds()`, called a second time in `SnapshotDetail` against the same inputs); a rect
+  with no resolved binding is inferred to be scope `"per-image"` by elimination (global/category
+  pools are always fully enumerated with ids, so an unmatched rect can't be either) and renders its
+  chip with no remove control, mirroring the overlay rect's own missing delete button exactly.
+  **Category-scope masks collapse to a single chip**, not one per mask: `{category} ({count})`,
+  `categoryColor(name).dot`-colored, no `#` prefix, no remove control — a category is a preset
+  bundle applied as one unit, not a set of individually-taggable masks, so the UI treats it that
+  way (a snapshot can only ever carry one category at a time, per the single `category` column, so
+  every category-scope binding in the merged list is guaranteed to share the same name). The
+  surviving way to delete an individual category mask is still `InteractiveImagePane`'s per-rect
+  overlay "×" on the image itself — Settings' `CategoriesSection` only ever exposes an aggregate
+  count plus whole-category rename/delete, never per-mask management. All `<img>` sites (baseline,
+  candidate/diff, history thumbnails) render through `AuthenticatedImage` (see below) rather than
+  plain `<img>`.
 - `src/categoryColor.ts` — `categoryColor(name)`: a deterministic string hash into a fixed
   8-color Tailwind palette (`{border, bg, dot}` classes). Pure and client-only — colors are never
   stored server-side, so no schema/API surface exists for them; the same category name always
   produces the same color on any client, without a database round-trip.
-- `src/imageDisplaySize.ts` — `ImageSize = "small" | "medium" | "large"`, a fixed
-  `{small: 240, medium: 400, large: 640}` px-width table (`imageSizePx()`), and
-  `getImageSize()`/`setImageSize()`. Deliberately **localStorage**-backed, unlike `authToken.ts`'s
-  `sessionStorage` — a display-size preference should persist across sessions, unlike a
-  security-sensitive credential, so this is a considered divergence, not an inconsistency.
 - `src/authToken.ts` — sessionStorage-backed auth token: `getAuthToken()` / `setAuthToken(token)`
   (removes the key on `null`/`""`), and `authHeaders()`, which returns `{ Authorization: "Bearer
   <token>" }` when a token is stored or `{}` otherwise. This is the single place
@@ -190,8 +207,7 @@ Consumes the backend HTTP API (`docs/API.md`).
 - `src/test-setup.ts` — vitest `setupFiles` entry: stubs `URL.createObjectURL`/`revokeObjectURL`
   (unimplemented in jsdom), which `AuthenticatedImage` needs in every test.
 - `src/*.test.tsx` — vitest (+ @testing-library/react, jsdom) tests. `src/categoryColor.test.ts`
-  and `src/imageDisplaySize.test.ts` are plain vitest unit tests (no React) for those two
-  standalone modules.
+  is a plain vitest unit test (no React) for that standalone module.
 
 ## Commands
 

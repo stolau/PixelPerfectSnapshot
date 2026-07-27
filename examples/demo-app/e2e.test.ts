@@ -506,7 +506,7 @@ test(
 );
 
 test(
-  "category management: tagging, then renaming, cascades back to the snapshot's own Category field",
+  "category management: tagging via mask assignment, then renaming, cascades back to the snapshot's own chip",
   async () => {
     if (serverUrl === "") throw new Error("the pipeline test must run (and pass) first");
     if (viewerUrl === "") throw new Error("the viewer test must run (and pass) first");
@@ -534,32 +534,42 @@ test(
     await categorySnapshot.click();
     await page.getByText("Status: pass").waitFor();
 
-    await page.getByLabel("Category").fill("E2E Category");
-    await page.getByRole("button", { name: "Save category" }).click();
+    // Category membership is only ever set as a side effect of assigning a mask to it -- there's
+    // no standalone Category field. Draw a rect and create a brand-new category from the picker.
+    const overlay = page.getByTestId("mask-overlay");
     await page.waitForFunction(() => {
-      const input = document.querySelector<HTMLInputElement>('input[aria-label="Category"]');
-      return input !== null && input.value === "E2E Category";
+      const img = document.querySelector<HTMLImageElement>('img[alt="candidate"]');
+      return img !== null && img.naturalWidth > 0;
     });
+    const box = await overlay.boundingBox();
+    if (box === null) throw new Error("mask overlay not visible");
+    await page.mouse.move(box.x + 20, box.y + 20);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 100, box.y + 80);
+    await page.mouse.up();
+    await page.getByTestId("mask-scope-picker").waitFor();
+    await page.getByRole("button", { name: "+ New category" }).click();
+    await page.getByLabel("New category name").fill("E2E Category");
+    await page.getByRole("button", { name: "Create & apply" }).click();
+    await page.getByTestId("mask-scope-picker").waitFor({ state: "detached" });
+    await page.getByText("E2E Category (1)").waitFor();
 
     await page.getByRole("button", { name: "Settings" }).click();
-    await page.getByText("E2E Category — 1 snapshots, 0 masks").waitFor();
+    await page.getByText("E2E Category — 1 snapshots, 1 masks").waitFor();
 
     await page.getByRole("button", { name: "Rename" }).click();
     await page.getByLabel("Rename E2E Category").fill("E2E Category Renamed");
     await page.getByRole("button", { name: "Save", exact: true }).click();
-    await page.getByText("E2E Category Renamed — 1 snapshots, 0 masks").waitFor();
+    await page.getByText("E2E Category Renamed — 1 snapshots, 1 masks").waitFor();
 
-    // Confirm the rename cascaded to the real snapshot row, not just the category listing.
+    // Confirm the rename cascaded to the real snapshot's masks chip, not just the category listing.
     await page.getByRole("button", { name: "PixelPerfectSnapshot" }).click();
     await runButtons.first().waitFor();
     await runButtons.first().click();
     await categorySnapshot.waitFor();
     await categorySnapshot.click();
     await page.getByText("Status: pass").waitFor();
-    await page.waitForFunction(() => {
-      const input = document.querySelector<HTMLInputElement>('input[aria-label="Category"]');
-      return input !== null && input.value === "E2E Category Renamed";
-    });
+    await page.getByText("E2E Category Renamed (1)").waitFor();
 
     await context.close();
   },

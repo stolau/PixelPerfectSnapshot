@@ -23,8 +23,9 @@ upload → render → diff → approve) against the real Flask backend.
   masks (drag-draw + save-as-global + delete against a real rendered image), Branches & Releases
   (a branch-scoped run created via a raw `fetch` — `createRun()` has no `scope` param — approved,
   then found through the viewer's filtered list), bulk approve (two new snapshots, both
-  checkbox-selected and approved in one action), and category management (tag → rename → confirm
-  the cascade landed on the snapshot's own Category field, not just the category listing) — the
+  checkbox-selected and approved in one action), and category management (tag via the
+  mask-assignment flow → rename → confirm the cascade landed on the snapshot's own masks-section
+  category chip, not just the category listing) — the
   four flows that shipped without any live-browser-plus-live-backend coverage despite several PRs
   citing this suite as verification. `capturePage()` takes an optional `name` param (default
   `"demo-page"`, so tests 1-2's calls are unchanged) so tests 3-6 can use distinctly-named

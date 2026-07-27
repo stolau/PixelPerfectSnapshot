@@ -4,7 +4,6 @@ import { App } from "./App.js";
 import { AuthenticatedImage } from "./AuthenticatedImage.js";
 import { setAuthToken } from "./authToken.js";
 import { categoryColor } from "./categoryColor.js";
-import { imageSizePx } from "./imageDisplaySize.js";
 import runsFixture from "./fixtures/runs.json";
 import runDetailFixture from "./fixtures/run-detail.json";
 import snapshotDetailFixture from "./fixtures/snapshot-detail.json";
@@ -494,6 +493,23 @@ test("Single view shows one image at a time via Baseline/Candidate tabs", async 
   expect(screen.queryByAltText("candidate")).toBeNull();
 });
 
+test("Single view's Baseline tab is disabled when there is no baseline yet", async () => {
+  routes[`GET ${SNAPSHOT_URL}`] = {
+    body: { ...snapshotDetailRenderedFixture, status: "approved-baseline-missing", baselineUrl: null },
+  };
+  await openSnapshotDetail();
+  await screen.findByAltText("candidate");
+
+  fireEvent.click(screen.getByRole("button", { name: "Single" }));
+
+  const baselineTab = screen.getByRole("button", { name: "Baseline" }) as HTMLButtonElement;
+  expect(baselineTab.disabled).toBe(true);
+
+  // Clicking a disabled button is a no-op in the DOM, but assert the view doesn't switch either.
+  fireEvent.click(baselineTab);
+  await screen.findByAltText("candidate");
+});
+
 test("process pending POSTs to the process endpoint, refetches, and updates statuses", async () => {
   routes[`POST /api/runs/${RUN_ID}/process`] = { body: runDetailFixture };
   await openRunDetail();
@@ -842,22 +858,6 @@ test("delete removes the mask once the refetch reflects it gone", async () => {
 const CATEGORY = "Example Base";
 const CATEGORY_MASKS_URL = `/api/categories/${encodeURIComponent(CATEGORY)}/masks`;
 
-test("category field shows the current value; saving PATCHes the snapshot", async () => {
-  routes[`GET ${SNAPSHOT_URL}`] = { body: { ...snapshotDetailFixture, category: CATEGORY } };
-  routes[`PATCH ${SNAPSHOT_URL}`] = { body: { name: SNAPSHOT_NAME, category: "Renamed" } };
-  await openSnapshotDetail();
-
-  const input = (await screen.findByLabelText("Category")) as HTMLInputElement;
-  expect(input.value).toBe(CATEGORY);
-
-  fireEvent.change(input, { target: { value: "Renamed" } });
-  fireEvent.click(screen.getByRole("button", { name: "Save category" }));
-
-  await waitFor(() => {
-    expect(requestBody("PATCH", SNAPSHOT_URL)).toEqual({ category: "Renamed" });
-  });
-});
-
 test("mask assignment menu shows no category buttons when no categories exist yet, but always offers + New category", async () => {
   routes[`GET ${SNAPSHOT_URL}`] = { body: snapshotDetailRenderedFixture }; // category: null
   await openSnapshotDetail();
@@ -936,6 +936,12 @@ test("+ New category tags the snapshot with the new category, then creates the m
     fireEvent.change(screen.getByLabelText("New category name"), {
       target: { value: CATEGORY },
     });
+    // Reflect the created mask in the post-create refetch so the masks section's category chip
+    // (the only remaining place category membership is visible, now that the standalone field is
+    // gone) actually has something to render.
+    routes[`GET ${SNAPSHOT_URL}/masks`] = {
+      body: { masks: [{ x: 0, y: 0, width: 50, height: 25 }] },
+    };
     fireEvent.click(screen.getByRole("button", { name: "Create & apply" }));
 
     await waitFor(() => {
@@ -944,9 +950,9 @@ test("+ New category tags the snapshot with the new category, then creates the m
 
     expect(requestBody("PATCH", SNAPSHOT_URL)).toEqual({ category: CATEGORY });
     expect(requestBody("POST", CATEGORY_MASKS_URL)).toEqual({ x: 0, y: 0, width: 50, height: 25 });
-    // The standalone "Category" field must reflect the newly-applied category too, not just the
-    // mask -- otherwise clicking "Save category" next would silently untag the snapshot again.
-    expect((screen.getByLabelText("Category") as HTMLInputElement).value).toBe(CATEGORY);
+    // The masks section's category chip must reflect the newly-applied category -- it's the only
+    // remaining UI surfacing category membership now that the standalone field is gone.
+    await screen.findByText(`${CATEGORY} (1)`);
   } finally {
     restoreLayout();
   }
@@ -970,7 +976,7 @@ test("mask overlay renders category masks with a working delete button", async (
   expect(rects[0].className).not.toMatch(/\bborder-red-500\b/);
 });
 
-test("masks hashtag row shows a scope-labeled chip per applicable mask, remove control only when the id is known", async () => {
+test("masks hashtag row shows a scope-labeled chip per non-category mask, remove control only when the id is known", async () => {
   routes[`GET ${SNAPSHOT_URL}`] = { body: { ...snapshotDetailRenderedFixture, category: CATEGORY } };
   const globalRect = { x: 0, y: 0, width: 10, height: 10 };
   const categoryRect = { x: 20, y: 20, width: 10, height: 10 };
@@ -983,15 +989,33 @@ test("masks hashtag row shows a scope-labeled chip per applicable mask, remove c
   await openSnapshotDetail();
 
   await screen.findByText("#global");
-  expect(screen.getByText(`#${CATEGORY}`)).toBeDefined();
   expect(screen.getByText("#this image")).toBeDefined();
-
-  // Global and category masks have ids from their own list endpoints -- removable.
+  // Global masks have ids from their own list endpoint -- removable.
   expect(screen.getByRole("button", { name: "Remove global mask" })).toBeDefined();
-  expect(screen.getByRole("button", { name: `Remove ${CATEGORY} mask` })).toBeDefined();
   // The per-image mask has no id source (no endpoint lists per-image masks with ids) --
   // same limitation the on-image overlay rects already have, mirrored here.
   expect(screen.queryByRole("button", { name: "Remove this image mask" })).toBeNull();
+
+  // Category-scope masks collapse to one plain, non-hashtag, non-removable count chip instead
+  // of one #-chip per mask -- a category is a preset, not an individually deletable tag here.
+  expect(screen.getByText(`${CATEGORY} (1)`)).toBeDefined();
+  expect(screen.queryByText(`#${CATEGORY}`)).toBeNull();
+  expect(screen.queryByRole("button", { name: `Remove ${CATEGORY} mask` })).toBeNull();
+});
+
+test("a category with multiple masks collapses to one count chip, not one per mask", async () => {
+  routes[`GET ${SNAPSHOT_URL}`] = { body: { ...snapshotDetailRenderedFixture, category: CATEGORY } };
+  const rectA = { x: 20, y: 20, width: 10, height: 10 };
+  const rectB = { x: 60, y: 60, width: 10, height: 10 };
+  const rectC = { x: 90, y: 90, width: 10, height: 10 };
+  routes[`GET ${SNAPSHOT_URL}/masks`] = { body: { masks: [rectA, rectB, rectC] } };
+  routes[`GET ${CATEGORY_MASKS_URL}`] = {
+    body: { masks: [{ id: 2, ...rectA }, { id: 3, ...rectB }, { id: 4, ...rectC }] },
+  };
+  await openSnapshotDetail();
+
+  await screen.findByText(`${CATEGORY} (3)`);
+  expect(screen.queryByText(`${CATEGORY} (1)`)).toBeNull();
 });
 
 test("removing a mask via its hashtag chip DELETEs through the right scope endpoint and refetches", async () => {
@@ -1034,28 +1058,6 @@ test("create mask failure surfaces the ApiError message and clears the pending r
   } finally {
     restoreLayout();
   }
-});
-
-test("Settings image-size buttons persist the choice and reflect it via aria-pressed", async () => {
-  render(<App />);
-  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-
-  expect(screen.getByRole("button", { name: "Medium" }).getAttribute("aria-pressed")).toBe("true");
-
-  fireEvent.click(screen.getByRole("button", { name: "Large" }));
-
-  expect(screen.getByRole("button", { name: "Large" }).getAttribute("aria-pressed")).toBe("true");
-  expect(screen.getByRole("button", { name: "Medium" }).getAttribute("aria-pressed")).toBe("false");
-  expect(localStorage.getItem("pps_image_size")).toBe("large");
-});
-
-test("snapshot images render at the size stored in Settings, not their natural viewport size", async () => {
-  localStorage.setItem("pps_image_size", "large");
-  routes[`GET ${SNAPSHOT_URL}`] = { body: snapshotDetailRenderedFixture };
-  await openSnapshotDetail();
-
-  const img = await screen.findByAltText("candidate");
-  expect(img.style.width).toBe(`${imageSizePx("large")}px`);
 });
 
 test("Categories section lists categories with counts and a color dot", async () => {
