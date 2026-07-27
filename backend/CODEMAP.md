@@ -15,6 +15,16 @@ approved baselines. HTTP contract: `docs/API.md`. Upload payload contract:
   requests get a 413), `ALLOWED_ORIGIN` (env `PPS_ALLOWED_ORIGIN`, comma-separated list of
   origins allowed to make cross-origin requests; unset → no CORS headers are sent, same-origin
   only), and `API_TOKEN` (env `PPS_API_TOKEN`; unset → auth fully off, same as today).
+  `add_cors_headers` (an `after_request` hook) echoes back the matched origin plus, on `OPTIONS`
+  preflights, `Access-Control-Allow-Methods: GET, POST, PATCH, DELETE` and
+  `Access-Control-Allow-Headers: Content-Type, Authorization` — both `PATCH` and `Authorization`
+  must be present for a cross-origin browser to successfully send an authenticated `PATCH`
+  (category rename, snapshot category update) once both `ALLOWED_ORIGIN` and `API_TOKEN` are set;
+  `before_request`'s token check already exempts `OPTIONS`, so the preflight itself always
+  succeeds regardless — it's specifically the *response*'s allow-list that has to include them,
+  or the browser silently refuses to send the real follow-up request. See
+  [docs/SELF_HOSTING.md](../docs/SELF_HOSTING.md) for the separate-host deployment this matters
+  for (same-host/nginx-proxied deployments never trigger CORS at all).
 - `app/api.py` — `/api` blueprint implementing `docs/API.md`. A `before_request` hook on the
   blueprint enforces `API_TOKEN` when set: requires `Authorization: Bearer <token>` (compared with
   `hmac.compare_digest`), returning the standard `{"error": ...}` 401 shape on a missing/malformed

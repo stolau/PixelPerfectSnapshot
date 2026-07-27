@@ -10,7 +10,7 @@ pixel-diff them against human-approved baselines on a server, review and approve
 | `packages/client/` | npm library installed into target projects; captures and uploads snapshots | TypeScript |
 | `backend/` | receives snapshots, re-renders, pixel-diffs against baselines | Python / Flask |
 | `viewer/` | web UI for runs, diffs, and baseline approval | React + Vite + TypeScript |
-| `docs/` | the frozen contracts: [snapshot format](docs/SNAPSHOT_FORMAT.md) · [HTTP API](docs/API.md) |
+| `docs/` | the frozen contracts: [snapshot format](docs/SNAPSHOT_FORMAT.md) · [HTTP API](docs/API.md) · [self-hosting](docs/SELF_HOSTING.md) |
 
 Each package documents its public surface in a `CODEMAP.md`.
 
@@ -85,3 +85,8 @@ rendered, and "concurrent calls for the same run may duplicate render work" (see
 [docs/API.md](docs/API.md)) — the system is designed around single-worker, roughly-serial
 processing. A multi-worker WSGI server would just multiply concurrent Chromium instances for no
 benefit. This is a self-hosted local tool, not built for concurrent multi-worker load.
+
+This `docker-compose.yml` deploys backend and viewer together, same host. To deploy them on
+separate hosts/domains instead (e.g. viewer on a static host/CDN, backend elsewhere), see
+[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md) — it also has the full environment variable
+reference (auth, CORS, diffing thresholds) that applies either way.
