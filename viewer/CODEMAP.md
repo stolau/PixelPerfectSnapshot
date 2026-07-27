@@ -179,7 +179,13 @@ Consumes the backend HTTP API (`docs/API.md`).
   dev-mode double-invoke. A non-ok response replaces the image with a visible error message
   instead of failing silently; a `401` specifically points at the auth token input above.
 - `src/api.ts` — typed client for the backend HTTP API (`docs/API.md`). Prefixes requests with
-  `VITE_API_BASE` (empty by default; dev server proxies `/api` to `http://localhost:5000`).
+  `VITE_API_BASE` (empty by default; dev server proxies `/api` to `http://localhost:5000`). In the
+  Docker build (`Dockerfile`), this is a build-time-only `ARG VITE_API_BASE=""` threaded into
+  `npm run build -w viewer` — the default reproduces today's same-origin behavior unchanged, but
+  `docker build --build-arg VITE_API_BASE=https://...` bakes in an absolute backend URL for a
+  viewer deployed on a separate host from the backend (see
+  [docs/SELF_HOSTING.md](../docs/SELF_HOSTING.md)). `docker-compose.yml` passes no build arg, so
+  this is a purely additive capability, not a behavior change to the existing compose setup.
   `RunSummary` includes `status` (`RunStatus` = `"pass" | "fail" | "pending"`), `scope`
   (`RunScope = {kind: "branch" | "release"; id: string} | null`), `newCount`, and `removedCount`
   alongside `id`/`createdAt`/`snapshotCount` — all computed server-side by `GET /api/runs`.
