@@ -579,6 +579,42 @@ test("approve 501 shows the error and leaves status unchanged", async () => {
   expect(screen.queryByText("Status: pass")).toBeNull();
 });
 
+test("Approve checkmark is disabled once status is pass -- a passing snapshot has nothing pending to approve", async () => {
+  routes[`GET ${SNAPSHOT_URL}`] = {
+    body: { ...snapshotDetailRenderedFixture, status: "pass", diffUrl: null },
+  };
+  await openSnapshotDetail();
+  await screen.findByText("Status: pass");
+
+  const approveButton = screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement;
+  expect(approveButton.disabled).toBe(true);
+
+  fireEvent.click(approveButton);
+  expect(requests()).not.toContainEqual(
+    expect.objectContaining({ method: "POST", url: `${SNAPSHOT_URL}/approve` }),
+  );
+});
+
+test("Approve checkmark stays enabled for a fail status", async () => {
+  routes[`GET ${SNAPSHOT_URL}`] = { body: snapshotDetailRenderedFixture }; // status: "fail"
+  await openSnapshotDetail();
+  await screen.findByText("Status: fail");
+  expect(
+    (screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled,
+  ).toBe(false);
+});
+
+test("Approve checkmark stays enabled for an approved-baseline-missing status", async () => {
+  routes[`GET ${SNAPSHOT_URL}`] = {
+    body: { ...snapshotDetailRenderedFixture, status: "approved-baseline-missing", baselineUrl: null },
+  };
+  await openSnapshotDetail();
+  await screen.findByText("Status: approved-baseline-missing");
+  expect(
+    (screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled,
+  ).toBe(false);
+});
+
 test("snapshot detail renders history entries newest-first with correct image URLs", async () => {
   routes[`GET ${SNAPSHOT_URL}/history`] = { body: snapshotHistoryFixture };
   const timestamps = snapshotHistoryFixture.history.map((entry) => entry.timestamp);
@@ -932,6 +968,50 @@ test("mask overlay renders category masks with a working delete button", async (
   // Category-scope masks get their category's deterministic color, not the default red.
   expect(rects[0].className).toContain(categoryColor(CATEGORY).border);
   expect(rects[0].className).not.toMatch(/\bborder-red-500\b/);
+});
+
+test("masks hashtag row shows a scope-labeled chip per applicable mask, remove control only when the id is known", async () => {
+  routes[`GET ${SNAPSHOT_URL}`] = { body: { ...snapshotDetailRenderedFixture, category: CATEGORY } };
+  const globalRect = { x: 0, y: 0, width: 10, height: 10 };
+  const categoryRect = { x: 20, y: 20, width: 10, height: 10 };
+  const perImageRect = { x: 40, y: 40, width: 10, height: 10 }; // no id source anywhere -- unresolved
+  routes[`GET ${SNAPSHOT_URL}/masks`] = {
+    body: { masks: [globalRect, categoryRect, perImageRect] },
+  };
+  routes["GET /api/masks"] = { body: { masks: [{ id: 1, ...globalRect }] } };
+  routes[`GET ${CATEGORY_MASKS_URL}`] = { body: { masks: [{ id: 2, ...categoryRect }] } };
+  await openSnapshotDetail();
+
+  await screen.findByText("#global");
+  expect(screen.getByText(`#${CATEGORY}`)).toBeDefined();
+  expect(screen.getByText("#this image")).toBeDefined();
+
+  // Global and category masks have ids from their own list endpoints -- removable.
+  expect(screen.getByRole("button", { name: "Remove global mask" })).toBeDefined();
+  expect(screen.getByRole("button", { name: `Remove ${CATEGORY} mask` })).toBeDefined();
+  // The per-image mask has no id source (no endpoint lists per-image masks with ids) --
+  // same limitation the on-image overlay rects already have, mirrored here.
+  expect(screen.queryByRole("button", { name: "Remove this image mask" })).toBeNull();
+});
+
+test("removing a mask via its hashtag chip DELETEs through the right scope endpoint and refetches", async () => {
+  routes[`GET ${SNAPSHOT_URL}`] = { body: snapshotDetailRenderedFixture };
+  const rect = { x: 0, y: 0, width: 10, height: 10 };
+  routes[`GET ${SNAPSHOT_URL}/masks`] = { body: { masks: [rect] } };
+  routes["GET /api/masks"] = { body: { masks: [{ id: 1, ...rect }] } };
+  routes["DELETE /api/masks/1"] = { status: 204 };
+  await openSnapshotDetail();
+
+  await screen.findByText("#global");
+  fireEvent.click(screen.getByRole("button", { name: "Remove global mask" }));
+
+  await waitFor(() => {
+    expect(requests()).toContainEqual({ method: "DELETE", url: "/api/masks/1" });
+  });
+  const globalMaskGets = requests().filter(
+    (r) => r.method === "GET" && r.url === "/api/masks",
+  );
+  expect(globalMaskGets.length).toBe(2); // mount fetch + post-delete refetch
 });
 
 test("create mask failure surfaces the ApiError message and clears the pending rect", async () => {

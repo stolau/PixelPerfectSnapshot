@@ -65,6 +65,13 @@ const alertError =
   "rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/50 dark:text-red-400";
 const mutedCenter = "py-10 text-center text-sm text-slate-500 dark:text-slate-400";
 
+/** Fixed dot colors for the two mask scopes that aren't named per-category (see categoryColor.ts
+ * for the category scope's hashed palette). */
+const MASK_SCOPE_DOT: Record<"global" | "per-image", string> = {
+  global: "bg-slate-500",
+  "per-image": "bg-blue-500",
+};
+
 const RUN_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
   month: "short",
   day: "numeric",
@@ -728,6 +735,27 @@ function resolveMaskIds(
   return bindings;
 }
 
+/**
+ * A rect with no resolved binding always turns out to be a pre-existing per-image mask by
+ * elimination: globalMasks/categoryMasks are always fully enumerated with ids from their own
+ * list endpoints, so anything left unmatched can't be either of those -- the only scope lacking
+ * a full-listing-with-ids endpoint is per-image (see resolveMaskIds).
+ */
+function maskChipScope(binding: { scope: MaskScope; id: number } | null): MaskScope {
+  return binding?.scope ?? "per-image";
+}
+
+function maskChipLabel(scope: MaskScope, category: string | null): string {
+  if (scope === "global") return "global";
+  if (scope === "per-image") return "this image";
+  return category ?? "category";
+}
+
+function maskChipDot(scope: MaskScope, category: string | null): string {
+  if (scope === "category") return category !== null ? categoryColor(category).dot : MASK_SCOPE_DOT.global;
+  return MASK_SCOPE_DOT[scope];
+}
+
 function ImagePane({
   label,
   children,
@@ -1178,6 +1206,9 @@ function SnapshotDetail({
   }
 
   const statusPill = snapshot !== null ? statusStyles(snapshot.status) : null;
+  const approveDisabled = snapshot !== null && snapshot.status === "pass";
+  const maskBindings =
+    masks !== null ? resolveMaskIds(masks, createdMasks, globalMasks ?? [], categoryMasks ?? []) : [];
 
   return (
     <div className="flex flex-col gap-4">
@@ -1190,12 +1221,12 @@ function SnapshotDetail({
       {error === null && snapshot === null && <p className={mutedCenter}>Loading…</p>}
       {snapshot !== null && statusPill !== null && (
         <>
-          <p
-            className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-sm font-medium ${statusPill.pill}`}
-          >
-            Status: {snapshot.status}
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <p
+              className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-sm font-medium ${statusPill.pill}`}
+            >
+              Status: {snapshot.status}
+            </p>
             <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
               Category
               <input
@@ -1203,10 +1234,10 @@ function SnapshotDetail({
                 value={categoryInput}
                 onChange={(e) => setCategoryInput(e.target.value)}
                 aria-label="Category"
-                className="w-48 rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 focus:border-slate-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                className="w-40 rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 focus:border-slate-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
               />
             </label>
-            <button onClick={saveCategory} className={btnSecondary}>
+            <button onClick={saveCategory} className={`${btnGhost} px-2 py-1 text-xs`}>
               Save category
             </button>
           </div>
@@ -1264,7 +1295,7 @@ function SnapshotDetail({
             );
             return (
               <>
-                <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-wrap items-center justify-center gap-3">
                   <div
                     role="group"
                     aria-label="View mode"
@@ -1293,14 +1324,7 @@ function SnapshotDetail({
                     />
                     Show diff
                   </label>
-                </div>
-                {viewMode === "dual" ? (
-                  <div className="flex flex-wrap justify-center gap-4">
-                    {baselinePane}
-                    {candidatePane}
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center gap-3">
+                  {viewMode === "single" && (
                     <div
                       role="group"
                       aria-label="Single view image"
@@ -1329,50 +1353,70 @@ function SnapshotDetail({
                         {showDiff ? "Diff" : "Candidate"}
                       </button>
                     </div>
-                    {singleTab === "baseline" ? baselinePane : candidatePane}
+                  )}
+                </div>
+                <div className="flex justify-center">
+                  <div className="relative">
+                    {viewMode === "dual" ? (
+                      <div className="flex flex-wrap justify-center gap-4">
+                        {baselinePane}
+                        {candidatePane}
+                      </div>
+                    ) : singleTab === "baseline" ? (
+                      baselinePane
+                    ) : (
+                      candidatePane
+                    )}
+                    <button
+                      onClick={approve}
+                      disabled={approveDisabled}
+                      aria-label="Approve"
+                      title={`Approve (status: ${snapshot.status})`}
+                      className={`absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full text-base font-bold leading-none text-white shadow-sm transition-opacity ${statusPill.dot} ${
+                        approveDisabled ? "cursor-not-allowed opacity-50" : "hover:opacity-90"
+                      }`}
+                    >
+                      ✓
+                    </button>
                   </div>
-                )}
+                </div>
               </>
             );
           })()}
-          <div>
-            <button onClick={approve} className={btnPrimary}>
-              Approve
-            </button>
-          </div>
           {approveError !== null && <p className={alertError}>{approveError}</p>}
-
-          <section className="flex flex-col gap-2">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              History
-            </h2>
-            {historyError !== null && <p className={alertError}>Error: {historyError}</p>}
-            {historyError === null && history === null && <p className={mutedCenter}>Loading…</p>}
-            {history !== null && history.length === 0 && (
-              <p className="text-sm text-slate-500 dark:text-slate-400">No history yet.</p>
-            )}
-            {history !== null && history.length > 0 && (
-              <div className="flex flex-wrap gap-4">
-                {history.map((entry) => (
-                  <div key={entry.timestamp} className={`${card} p-2`}>
-                    <AuthenticatedImage
-                      src={historyImageUrl(runId, name, entry.timestamp)}
-                      alt={`history ${entry.timestamp}`}
-                      className="h-auto max-w-40 rounded"
-                    />
-                    <p className="mt-1 text-center text-xs text-slate-500 dark:text-slate-400">
-                      {entry.timestamp}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
 
           <section className="flex flex-col gap-2">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
               Masks
             </h2>
+            {masks !== null && masks.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {masks.map((_rect, i) => {
+                  const binding = maskBindings[i] ?? null;
+                  const scope = maskChipScope(binding);
+                  const label = maskChipLabel(scope, snapshot.category);
+                  const dot = maskChipDot(scope, snapshot.category);
+                  return (
+                    <span
+                      key={i}
+                      className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                    >
+                      <span className={`h-2 w-2 rounded-full ${dot}`} />
+                      #{label}
+                      {binding !== null && (
+                        <button
+                          aria-label={`Remove ${label} mask`}
+                          onClick={() => deleteMask(binding.scope, binding.id)}
+                          className="ml-0.5 leading-none text-slate-400 hover:text-red-600 dark:text-slate-500"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
             {pendingRect !== null && (
               <MaskAssignmentMenu
                 existingCategories={existingCategories ?? []}
@@ -1385,6 +1429,37 @@ function SnapshotDetail({
             )}
             {masksError !== null && <p className={alertError}>{masksError}</p>}
           </section>
+
+          <details className="flex flex-col gap-2">
+            <summary className="cursor-pointer text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              History
+            </summary>
+            <div className="mt-2 flex flex-col gap-2">
+              {historyError !== null && <p className={alertError}>Error: {historyError}</p>}
+              {historyError === null && history === null && (
+                <p className={mutedCenter}>Loading…</p>
+              )}
+              {history !== null && history.length === 0 && (
+                <p className="text-sm text-slate-500 dark:text-slate-400">No history yet.</p>
+              )}
+              {history !== null && history.length > 0 && (
+                <div className="flex flex-wrap gap-4">
+                  {history.map((entry) => (
+                    <div key={entry.timestamp} className={`${card} p-2`}>
+                      <AuthenticatedImage
+                        src={historyImageUrl(runId, name, entry.timestamp)}
+                        alt={`history ${entry.timestamp}`}
+                        className="h-auto max-w-40 rounded"
+                      />
+                      <p className="mt-1 text-center text-xs text-slate-500 dark:text-slate-400">
+                        {entry.timestamp}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </details>
         </>
       )}
     </div>

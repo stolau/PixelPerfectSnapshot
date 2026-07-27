@@ -59,11 +59,24 @@ Consumes the backend HTTP API (`docs/API.md`).
   (`scoped_baseline_read_path()`), so `RunDetail`/`SnapshotDetail` needed zero changes to work
   correctly for scoped runs — this feature is purely about *getting to* the right runs.
 
-  **Snapshot detail** shows an inline-editable "Category" text field (empty string ↔ `null`) next
-  to the status pill; "Save category" PATCHes it via `updateSnapshotCategory()` and updates local
-  state directly (no refetch). A "History" section (thumbnails of prior baselines, newest-first) is
-  fetched on mount and refetched after a successful approve, which itself refetches the snapshot
-  detail so status stays fresh.
+  **Snapshot detail** is laid out to keep the image itself the visual focus, with all chrome
+  reflowed tightly around it: a header line holds the status pill and an inline-editable
+  "Category" text field (empty string ↔ `null`, "Save category" PATCHes via
+  `updateSnapshotCategory()` and updates local state directly, no refetch); a single control line
+  directly above the image holds the Dual/Single toggle, "Show diff" checkbox, and (in Single mode
+  only) the Baseline/Candidate tabs; then the image(s) themselves. Approve is a small circular
+  checkmark button pinned to the top-right corner of the image area (covering both panes in Dual
+  view, not nested inside either one) rather than a full-width text button, colored via the same
+  `statusStyles(status).dot` used by the status pill — amber (`approved-baseline-missing`), red
+  (`fail`), green (`pass`), grey (`pending`/unknown) — and **disabled once `status === "pass"`**:
+  approving a passing snapshot is not actually a no-op server-side (`compare()`'s
+  `MAX_DIFF_RATIO` tolerates small drift, so a passing snapshot can still differ slightly from its
+  baseline, and approving would re-pin it), but the UI deliberately trades that drift-reset
+  capability away for a simpler "green = nothing to click" affordance — it's reachable only via a
+  raw API call once a snapshot is already passing. Below the image, a "Masks" hashtag-style chip
+  row (see below) and a collapsed-by-default `<details>` "History" section (thumbnails of prior
+  baselines, newest-first, fetched on mount and refetched after a successful approve, which itself
+  refetches the snapshot detail so status stays fresh).
 
   Image display is **Dual** (baseline + candidate/diff side by side, the default) or **Single**
   (one pane at a time via Baseline/Candidate tabs) — a "Show diff" checkbox swaps whichever pane is
@@ -109,8 +122,20 @@ Consumes the backend HTTP API (`docs/API.md`).
   per-image masks together with their ids. This is a known limitation of the current (frozen) API
   surface, not a bug. `resolveMaskIds()` takes all three id-bearing pools (session-created, global,
   category) and binds each rendered rect to a `{scope, id}` by identity, where `scope` is
-  `"global" | "per-image" | "category"`. All `<img>` sites (baseline, candidate/diff, history
-  thumbnails) render through `AuthenticatedImage` (see below) rather than plain `<img>`.
+  `"global" | "per-image" | "category"`.
+
+  Applicable masks — previously visible **only** as overlay rectangles on the candidate image
+  itself, with no indication anywhere else that a snapshot had any masks at all — now also render
+  as a row of Instagram-style hashtag chips below the image (`#global`, `#this image`, or the
+  category name), each with a colored dot: `categoryColor(name).dot` for category scope, two new
+  fixed constants (`MASK_SCOPE_DOT`) for global/per-image, since those two scopes have no name to
+  hash. A chip's binding is resolved the same way as its overlay rect (`resolveMaskIds()`, called a
+  second time in `SnapshotDetail` against the same inputs); a rect with no resolved binding is
+  inferred to be scope `"per-image"` by elimination (global/category pools are always fully
+  enumerated with ids, so an unmatched rect can't be either) and renders its chip with no remove
+  control, mirroring the overlay rect's own missing delete button exactly rather than introducing a
+  second, inconsistent notion of "unknown mask." All `<img>` sites (baseline, candidate/diff,
+  history thumbnails) render through `AuthenticatedImage` (see below) rather than plain `<img>`.
 - `src/categoryColor.ts` — `categoryColor(name)`: a deterministic string hash into a fixed
   8-color Tailwind palette (`{border, bg, dot}` classes). Pure and client-only — colors are never
   stored server-side, so no schema/API surface exists for them; the same category name always
