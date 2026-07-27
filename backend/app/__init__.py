@@ -57,8 +57,8 @@ def create_app(data_dir: str | os.PathLike | None = None) -> Flask:
         if origin in allowed_origins:
             response.headers["Access-Control-Allow-Origin"] = origin
             if request.method == "OPTIONS":
-                response.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE"
-                response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+                response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, DELETE"
+                response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
         return response
 
     return app

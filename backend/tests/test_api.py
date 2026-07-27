@@ -294,6 +294,11 @@ def test_cors_preflight(tmp_path, monkeypatch):
     assert response.headers["Access-Control-Allow-Origin"] == "https://a.example.com"
     assert "POST" in response.headers["Access-Control-Allow-Methods"]
     assert "Content-Type" in response.headers["Access-Control-Allow-Headers"]
+    # A cross-origin browser can't send Authorization unless the preflight explicitly allows it --
+    # without this, PPS_API_TOKEN + PPS_ALLOWED_ORIGIN together silently break every authenticated
+    # cross-origin request, even though the preflight itself (exempted from the token check) and
+    # the actual request (if the header were let through) would both otherwise succeed.
+    assert "Authorization" in response.headers["Access-Control-Allow-Headers"]
 
 
 def test_cors_preflight_delete_only_route(tmp_path, monkeypatch):
@@ -310,6 +315,25 @@ def test_cors_preflight_delete_only_route(tmp_path, monkeypatch):
     )
     assert response.headers["Access-Control-Allow-Origin"] == "https://a.example.com"
     assert "DELETE" in response.headers["Access-Control-Allow-Methods"]
+
+
+def test_cors_preflight_patch_route(tmp_path, monkeypatch):
+    # PATCH is never CORS-safelisted, so it always preflights -- category rename/snapshot-category
+    # update are real cross-origin PATCH calls the viewer makes (viewer/src/api.ts).
+    monkeypatch.setenv("PPS_ALLOWED_ORIGIN", "https://a.example.com,https://b.example.com")
+    client = create_app(data_dir=tmp_path).test_client()
+
+    response = client.options(
+        "/api/categories/Example",
+        headers={
+            "Origin": "https://a.example.com",
+            "Access-Control-Request-Method": "PATCH",
+            "Access-Control-Request-Headers": "Content-Type, Authorization",
+        },
+    )
+    assert response.headers["Access-Control-Allow-Origin"] == "https://a.example.com"
+    assert "PATCH" in response.headers["Access-Control-Allow-Methods"]
+    assert "Authorization" in response.headers["Access-Control-Allow-Headers"]
 
 
 def upload_snapshot(client, run_id: str, doc: dict) -> None:

@@ -109,7 +109,12 @@ Consumes the backend HTTP API (`docs/API.md`).
   `newCategoryInput`/`showNewCategoryField` state — pure UI-input state scoped to the menu's own
   lifetime, unlike `pendingRect`) offering Global / This snapshot / one button per existing
   category (fetched via `listCategories()` when the menu opens, each with a `categoryColor()` dot)
-  / "+ New category" (inline name field). Picking an existing category or creating a new one both
+  / "+ New category" (inline name field). It renders as a floating popup **inside
+  `InteractiveImagePane`** (not in the Masks section below the image, where it used to live and
+  where it was easy to lose track of after drawing a box near the top of a tall image) —
+  positioned `absolute`, just below-left of the just-drawn `pendingRect`, using the exact same
+  natural-to-displayed `scaleX`/`scaleY` math already used to place saved mask rects, so it tracks
+  the actual on-screen box regardless of image size or dual/single view mode. Picking an existing category or creating a new one both
   route through `applyCategory()`, which — before creating the mask — PATCHes the snapshot's own
   `category` to match if it doesn't already (via `updateSnapshotCategory`), since
   `applicable_masks()` on the backend resolves category masks by *the snapshot's own* `category`
@@ -179,7 +184,13 @@ Consumes the backend HTTP API (`docs/API.md`).
   dev-mode double-invoke. A non-ok response replaces the image with a visible error message
   instead of failing silently; a `401` specifically points at the auth token input above.
 - `src/api.ts` — typed client for the backend HTTP API (`docs/API.md`). Prefixes requests with
-  `VITE_API_BASE` (empty by default; dev server proxies `/api` to `http://localhost:5000`).
+  `VITE_API_BASE` (empty by default; dev server proxies `/api` to `http://localhost:5000`). In the
+  Docker build (`Dockerfile`), this is a build-time-only `ARG VITE_API_BASE=""` threaded into
+  `npm run build -w viewer` — the default reproduces today's same-origin behavior unchanged, but
+  `docker build --build-arg VITE_API_BASE=https://...` bakes in an absolute backend URL for a
+  viewer deployed on a separate host from the backend (see
+  [docs/SELF_HOSTING.md](../docs/SELF_HOSTING.md)). `docker-compose.yml` passes no build arg, so
+  this is a purely additive capability, not a behavior change to the existing compose setup.
   `RunSummary` includes `status` (`RunStatus` = `"pass" | "fail" | "pending"`), `scope`
   (`RunScope = {kind: "branch" | "release"; id: string} | null`), `newCount`, and `removedCount`
   alongside `id`/`createdAt`/`snapshotCount` — all computed server-side by `GET /api/runs`.
