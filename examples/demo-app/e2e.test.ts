@@ -7,7 +7,7 @@ import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 import { createRun, processRun, sendSnapshots, type Snapshot } from "pixelperfectsnapshot";
 import { afterAll, expect, test } from "vitest";
 
@@ -47,6 +47,23 @@ let flaskEnv: NodeJS.ProcessEnv = process.env;
 // Assigned by the viewer test; later tests that drive the real viewer UI reuse it.
 let viewerUrl = "";
 
+// Opt-in dogfooding: this suite already drives the real viewer through its key screens (run
+// list, run detail, snapshot detail, Settings, Branches & Releases) -- when these env vars are
+// set, the tests below also stash a snapshot of each screen, and afterAll uploads them as one
+// batch run against a real, persistent PixelPerfectSnapshot instance (review/approval then
+// happens through that instance's own viewer, same as any other snapshot; this never
+// auto-approves). No-op, zero behavior change, when unset -- the default for a normal
+// `npm run test:e2e`. See examples/demo-app/CODEMAP.md.
+const dogfoodServerUrl = process.env.PPS_DOGFOOD_SERVER_URL;
+const dogfoodToken = process.env.PPS_DOGFOOD_TOKEN;
+const dogfoodSnapshots: Snapshot[] = [];
+
+async function dogfoodCapture(page: Page, name: string): Promise<void> {
+  if (!dogfoodServerUrl) return;
+  await page.addScriptTag({ path: captureBundle });
+  dogfoodSnapshots.push(await page.evaluate((n) => window.__ppsCapture(document, n), name));
+}
+
 async function getSnapshotDetail(runId: string) {
   const res = await fetch(`${serverUrl}/api/runs/${runId}/snapshots/demo-page`);
   expect(res.status).toBe(200);
@@ -77,6 +94,18 @@ afterAll(async () => {
   }
   await browser?.close();
   if (dataDir) rmSync(dataDir, { recursive: true, force: true });
+
+  if (dogfoodServerUrl && dogfoodSnapshots.length > 0) {
+    const dogfoodRunId = (
+      await createRun({ serverUrl: dogfoodServerUrl, token: dogfoodToken })
+    ).id;
+    await sendSnapshots(dogfoodSnapshots, {
+      serverUrl: dogfoodServerUrl,
+      runId: dogfoodRunId,
+      token: dogfoodToken,
+    });
+    await processRun({ serverUrl: dogfoodServerUrl, runId: dogfoodRunId, token: dogfoodToken });
+  }
 });
 
 function freePort(): Promise<number> {
@@ -93,6 +122,7 @@ async function capturePage(
   baseUrl: string,
   viewport = { width: WIDTH, height: HEIGHT },
   name = "demo-page",
+  category?: string,
 ): Promise<Snapshot> {
   if (!browser) throw new Error("browser not launched");
   const context = await browser.newContext({ viewport });
@@ -107,7 +137,64 @@ async function capturePage(
     await Promise.all(Array.from(document.images).map((img) => img.decode().catch(() => {})));
   });
   await page.addScriptTag({ path: captureBundle });
-  const snapshot = await page.evaluate((n) => window.__ppsCapture(document, n), name);
+  const snapshot = await page.evaluate(
+    ({ n, c }) => window.__ppsCapture(document, n, c ? { category: c } : undefined),
+    { n: name, c: category },
+  );
+  await context.close();
+  return snapshot;
+}
+
+/** Captures a page with the .box color forced back to its ORIGINAL value client-side --
+ * independent of the shared static site server's own `variant` flag (already permanently
+ * "changed" by the time later tests run; see the pipeline test above). Without this, a
+ * mask-effect test's "baseline" capture would silently already be showing the regressed color
+ * too (since it comes from the same shared, already-flipped site server), making its later
+ * "regression" capture look identical to the baseline regardless of whether masks do anything. */
+async function captureCleanPage(
+  baseUrl: string,
+  name: string,
+  category?: string,
+): Promise<Snapshot> {
+  if (!browser) throw new Error("browser not launched");
+  const context = await browser.newContext({ viewport: { width: WIDTH, height: HEIGHT } });
+  const page = await context.newPage();
+  await page.goto(`${baseUrl}/index.html`, { waitUntil: "load" });
+  await page.evaluate(() => {
+    const box = document.querySelector(".box");
+    if (box instanceof HTMLElement) box.style.background = "#1a1a6e";
+  });
+  await page.addScriptTag({ path: captureBundle });
+  const snapshot = await page.evaluate(
+    ({ n, c }) => window.__ppsCapture(document, n, c ? { category: c } : undefined),
+    { n: name, c: category },
+  );
+  await context.close();
+  return snapshot;
+}
+
+/** Captures a page with the .box regression color applied client-side -- independent of the
+ * shared static site server's own `variant` flag (already permanently "changed" by the time
+ * later tests run; see the pipeline test above), so this stays usable from any test regardless
+ * of execution order. */
+async function captureRegressedPage(
+  baseUrl: string,
+  name: string,
+  category?: string,
+): Promise<Snapshot> {
+  if (!browser) throw new Error("browser not launched");
+  const context = await browser.newContext({ viewport: { width: WIDTH, height: HEIGHT } });
+  const page = await context.newPage();
+  await page.goto(`${baseUrl}/index.html`, { waitUntil: "load" });
+  await page.evaluate(() => {
+    const box = document.querySelector(".box");
+    if (box instanceof HTMLElement) box.style.background = "#c0392b";
+  });
+  await page.addScriptTag({ path: captureBundle });
+  const snapshot = await page.evaluate(
+    ({ n, c }) => window.__ppsCapture(document, n, c ? { category: c } : undefined),
+    { n: name, c: category },
+  );
   await context.close();
   return snapshot;
 }
@@ -312,6 +399,7 @@ test(
     const runButtons = page.locator("ul li button");
     await runButtons.first().waitFor();
     expect(await runButtons.count()).toBe(4);
+    await dogfoodCapture(page, "dogfood-run-list");
 
     // Run 4 detail: approval needed at the new viewport.
     await runButtons.first().click();
@@ -319,6 +407,7 @@ test(
       name: "demo-page — 320x240 — approved-baseline-missing",
     });
     await run4Snapshot.waitFor();
+    await dogfoodCapture(page, "dogfood-run-detail");
 
     // Run 4 snapshot detail: candidate image must actually load through the /backend prefix.
     await run4Snapshot.click();
@@ -354,6 +443,7 @@ test(
         return img !== null && img.naturalWidth > 0;
       }, alt);
     }
+    await dogfoodCapture(page, "dogfood-snapshot-detail-dual");
     // "Show diff" swaps the candidate-slot pane to the diff image; must also load through /backend.
     await page.getByLabel("Show diff").check();
     await page.waitForFunction(() => {
@@ -445,6 +535,9 @@ test(
     await page.goto(viewerUrl, { waitUntil: "load" });
 
     await page.getByRole("button", { name: "Branches & Releases" }).click();
+    await page.getByRole("heading", { name: "Branches & Releases" }).waitFor();
+    await page.getByRole("button", { name: "e2e-branch" }).waitFor();
+    await dogfoodCapture(page, "dogfood-branches-releases");
     await page.getByRole("button", { name: "e2e-branch" }).click();
     await page.getByRole("heading", { name: "Branch: e2e-branch" }).waitFor();
 
@@ -556,6 +649,7 @@ test(
 
     await page.getByRole("button", { name: "Settings" }).click();
     await page.getByText("E2E Category — 1 snapshots, 1 masks").waitFor();
+    await dogfoodCapture(page, "dogfood-settings");
 
     await page.getByRole("button", { name: "Rename" }).click();
     await page.getByLabel("Rename E2E Category").fill("E2E Category Renamed");
@@ -840,6 +934,7 @@ test(
     if (singleCandidateBox === null) throw new Error("image not visible in single view");
     expect(singleCandidateBox.width).toBeGreaterThan(WIDTH);
     expect(singleCandidateBox.width).toBeGreaterThan(dualCandidateBox.width);
+    await dogfoodCapture(page, "dogfood-snapshot-detail-single");
 
     await context.close();
   },
@@ -1109,6 +1204,165 @@ test(
       }
       rmSync(authDataDir, { recursive: true, force: true });
     }
+  },
+  240_000,
+);
+
+test(
+  "masks: a per-image mask drawn live genuinely suppresses a real regression, not just its own UI",
+  async () => {
+    if (serverUrl === "") throw new Error("the pipeline test must run (and pass) first");
+    if (viewerUrl === "") throw new Error("the viewer test must run (and pass) first");
+
+    // Every existing masks test only proves the UI's create/save/delete CRUD -- none of them
+    // ever re-check a run's pass/fail outcome, so none actually prove a mask drawn through the
+    // live browser does what it's for: suppressing a real pixel diff. This one does, end to end.
+    const name = "mask-effect-unique-page";
+    const baselineRunId = (await createRun({ serverUrl })).id;
+    await sendSnapshots([await captureCleanPage(siteUrl, name)], {
+      serverUrl,
+      runId: baselineRunId,
+    });
+    await processRun({ serverUrl, runId: baselineRunId });
+    await fetch(`${serverUrl}/api/runs/${baselineRunId}/snapshots/${name}/approve`, {
+      method: "POST",
+    });
+
+    const context = await browser!.newContext({ viewport: { width: 1200, height: 700 } });
+    const page = await context.newPage();
+    await page.goto(viewerUrl, { waitUntil: "load" });
+
+    const runButtons = page.locator("ul li button");
+    await runButtons.first().waitFor();
+    await runButtons.first().click();
+    const snapshotBtn = page.getByRole("button", { name: new RegExp(`^${name} `) });
+    await snapshotBtn.waitFor();
+    await snapshotBtn.click();
+    await page.getByText("Status: pass").waitFor();
+
+    const overlay = page.getByTestId("mask-overlay");
+    await page.waitForFunction(() => {
+      const img = document.querySelector<HTMLImageElement>('img[alt="candidate"]');
+      return img !== null && img.naturalWidth > 0;
+    });
+    const box = await overlay.boundingBox();
+    if (box === null) throw new Error("mask overlay not visible");
+    // Generous, near-full-image coverage rather than precisely targeting the .box element --
+    // pixel-precise mask boundary correctness is already thoroughly proven at the backend layer
+    // (backend/tests/test_render.py's test_mask_covers_region_no_fail deliberately checks
+    // off-by-one edge behavior); the point here is only that a mask genuinely drawn and saved
+    // through the real browser takes effect at all.
+    await page.mouse.move(box.x + 5, box.y + 5);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width - 5, box.y + box.height - 5);
+    await page.mouse.up();
+    await page.getByTestId("mask-scope-picker").waitFor();
+    await page.getByRole("button", { name: "Save as mask for this snapshot" }).click();
+    await page.getByTestId("mask-scope-picker").waitFor({ state: "detached" });
+    await page.getByTestId("mask-rect").waitFor();
+
+    await context.close();
+
+    // Per-image masks are keyed by (name, viewport), not by run (backend/app/render.py's
+    // image_path/applicable_masks) -- so this new run, uploaded and processed for the first
+    // time *after* the mask above was saved, must come out "pass" directly. Unlike the backend's
+    // own tests (which insert the mask before ever calling process()), this is the first place
+    // that ordering is proven through the real upload -> mask -> process sequence a real user
+    // would follow, driven by an actual live-browser mask-creation action, not a DB fixture.
+    const regressionRunId = (await createRun({ serverUrl })).id;
+    await sendSnapshots([await captureRegressedPage(siteUrl, name)], {
+      serverUrl,
+      runId: regressionRunId,
+    });
+    await processRun({ serverUrl, runId: regressionRunId });
+    const detail = await fetch(`${serverUrl}/api/runs/${regressionRunId}/snapshots/${name}`).then(
+      (r) => r.json(),
+    );
+    expect(detail.status).toBe("pass");
+  },
+  240_000,
+);
+
+test(
+  "masks: a category mask created live suppresses a regression on a different snapshot name entirely",
+  async () => {
+    if (serverUrl === "") throw new Error("the pipeline test must run (and pass) first");
+    if (viewerUrl === "") throw new Error("the viewer test must run (and pass) first");
+
+    // The actual point of category masks (vs. per-image ones): defined once against one
+    // snapshot, they apply to any other snapshot -- any name -- that shares the category. Proven
+    // here across two genuinely different names, mirroring the backend's own
+    // test_category_mask_applies_across_snapshot_names_in_same_category, but through the real
+    // browser mask-creation flow instead of a DB fixture.
+    const nameA = "mask-effect-category-page-a";
+    const nameB = "mask-effect-category-page-b";
+    const category = "E2E Mask Effect Category";
+
+    // Both names need their own pre-existing baseline -- a mask only suppresses a *diff*
+    // against something; it can't manufacture a first-ever baseline for a name that's never
+    // been approved before (confirmed by first running this test without this nameB baseline:
+    // it failed with status "approved-baseline-missing", not "pass" -- the real backend
+    // behavior, not a test bug, matching the backend's own
+    // test_category_mask_applies_across_snapshot_names_in_same_category establishing both
+    // names' baselines up front too).
+    const baselineRunId = (await createRun({ serverUrl })).id;
+    await sendSnapshots(
+      [await captureCleanPage(siteUrl, nameA), await captureCleanPage(siteUrl, nameB)],
+      { serverUrl, runId: baselineRunId },
+    );
+    await processRun({ serverUrl, runId: baselineRunId });
+    await fetch(`${serverUrl}/api/runs/${baselineRunId}/snapshots/${nameA}/approve`, {
+      method: "POST",
+    });
+    await fetch(`${serverUrl}/api/runs/${baselineRunId}/snapshots/${nameB}/approve`, {
+      method: "POST",
+    });
+
+    const context = await browser!.newContext({ viewport: { width: 1200, height: 700 } });
+    const page = await context.newPage();
+    await page.goto(viewerUrl, { waitUntil: "load" });
+
+    const runButtons = page.locator("ul li button");
+    await runButtons.first().waitFor();
+    await runButtons.first().click();
+    const snapshotBtn = page.getByRole("button", { name: new RegExp(`^${nameA} `) });
+    await snapshotBtn.waitFor();
+    await snapshotBtn.click();
+    await page.getByText("Status: pass").waitFor();
+
+    const overlay = page.getByTestId("mask-overlay");
+    await page.waitForFunction(() => {
+      const img = document.querySelector<HTMLImageElement>('img[alt="candidate"]');
+      return img !== null && img.naturalWidth > 0;
+    });
+    const box = await overlay.boundingBox();
+    if (box === null) throw new Error("mask overlay not visible");
+    await page.mouse.move(box.x + 5, box.y + 5);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width - 5, box.y + box.height - 5);
+    await page.mouse.up();
+    await page.getByTestId("mask-scope-picker").waitFor();
+    await page.getByRole("button", { name: "+ New category" }).click();
+    await page.getByLabel("New category name").fill(category);
+    await page.getByRole("button", { name: "Create & apply" }).click();
+    await page.getByTestId("mask-scope-picker").waitFor({ state: "detached" });
+    await page.getByText(`${category} (1)`).waitFor();
+
+    await context.close();
+
+    // nameB has never existed before this point -- it only shares the category, set at upload
+    // time via capturePage's category param (all snapshots sharing a category must share a
+    // viewport too, which the shared default WIDTH/HEIGHT here satisfies automatically).
+    const regressionRunId = (await createRun({ serverUrl })).id;
+    await sendSnapshots([await captureRegressedPage(siteUrl, nameB, category)], {
+      serverUrl,
+      runId: regressionRunId,
+    });
+    await processRun({ serverUrl, runId: regressionRunId });
+    const detail = await fetch(
+      `${serverUrl}/api/runs/${regressionRunId}/snapshots/${nameB}`,
+    ).then((r) => r.json());
+    expect(detail.status).toBe("pass");
   },
   240_000,
 );

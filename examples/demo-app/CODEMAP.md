@@ -11,7 +11,7 @@ upload → render → diff → approve) against the real Flask backend.
   (distinct `alt="dot-N"` per `<img>`, same underlying file — no need for 10 separate binary
   assets) purely so a captured/rendered snapshot has more than one real `<img>` to look at when
   browsing manually; none of the gallery images are referenced by any test assertion.
-- `e2e.test.ts` — vitest e2e suite, fourteen tests, **run in file declaration order, not
+- `e2e.test.ts` — vitest e2e suite, sixteen tests, **run in file declaration order, not
   independent**: each later test reuses the real Flask backend / demo site / browser / built
   viewer the earlier ones spawned, via module-level `let` state (`serverUrl`, `siteUrl`,
   `viewerUrl`, `browser`, `dataDir`, …) — every test past the first two opens with an explicit
@@ -37,7 +37,7 @@ upload → render → diff → approve) against the real Flask backend.
   genuine DOM element rather than React Testing Library's simulated one. `capturePage()` takes an
   optional `name` param (default `"demo-page"`, so tests 1-2's calls are unchanged) so later tests
   can use distinctly-named snapshots and avoid colliding with tests 1-2's own baseline/approval
-  state in the shared data dir. The in-file viewer proxy (started by test 2, reused by tests 3-13)
+  state in the shared data dir. The in-file viewer proxy (started by test 2, reused by tests 3-16)
   forwards the request body and `Content-Type` for any method — not just the bodyless
   `POST .../approve` the original two-test suite ever sent through it — since mask creation and
   category rename both need a real JSON body to reach the backend through the live viewer's own
@@ -60,27 +60,45 @@ upload → render → diff → approve) against the real Flask backend.
   browse flow against a **second, fully self-contained** Flask process spawned with
   `PPS_API_TOKEN` set (own temp data dir, own port, own viewer-proxy static server, torn down in
   a local `finally` block) — auth is deliberately never turned on on the shared backend the other
-  thirteen tests reuse, since that would break all of their existing unauthenticated calls;
+  fifteen tests reuse, since that would break all of their existing unauthenticated calls;
   confirms both that an unauthenticated request is genuinely rejected (`401`) and that the
   viewer's own Settings auth-token field unlocks the real, live flow end to end.
-- `dogfood-viewer.mjs` — a different kind of dogfooding than `e2e.test.ts`: instead of driving a
-  fully ephemeral, self-contained backend torn down at the end of the run, this points at a
-  **real, persistent, already-deployed** PixelPerfectSnapshot instance (`PPS_SERVER_URL` +
-  `PPS_VIEWER_URL` env vars, `PPS_API_TOKEN` optional) and captures a handful of the viewer's own
-  key pages (run list, run detail, snapshot detail dual/single, Settings, Branches & Releases) as
-  snapshots *of the product itself*, using the same `pixelperfectsnapshot` client any consumer
-  would. It never auto-approves — review and approval happen through that same real, deployed
-  viewer, the same as any other snapshot in it. Snapshot names are fixed
-  (`dogfood-run-list`, `dogfood-snapshot-detail-dual`, …), so repeated runs diff against whatever
-  was previously approved for that name; there's nothing dogfood-specific about the diffing
-  itself. Each run also seeds a small amount of fresh, `dogfood-`-prefixed demo data (a passing
-  baseline plus a genuine regression against it) so the captured pages always have something real
-  to render, even against a brand-new instance — this accumulates across repeated runs the same
-  way any product's real usage would; the script makes no attempt to manage retention. The point:
-  a genuine layout regression in the viewer itself (the kind this project has so far only caught
-  by hand, via one-off Docker/Podman screenshots — an image silently shrinking to its intrinsic
-  size, a popup drifting off its anchor) becomes a real, reviewable diff instead, the same way any
-  other product's visual regression would surface.
+
+  Tests 15-16 prove masks have a real *effect* on the pass/fail outcome, not just that their CRUD
+  UI works (tests 3, 7, and 9 draw/save/delete masks but never re-check a run's status
+  afterward): a per-image mask drawn live through the real browser genuinely suppresses a real
+  regression captured against the *same* (name, viewport) in a new run processed for the first
+  time after the mask was saved, and a category mask created live on one snapshot name suppresses
+  a regression on a completely different name sharing that category — mirroring the backend's own
+  `test_mask_covers_region_no_fail` /
+  `test_category_mask_applies_across_snapshot_names_in_same_category`, but through the live
+  browser mask-creation flow rather than a DB fixture. Both use `captureCleanPage()` (not
+  `capturePage()`) for their pre-mask baseline: the shared static site server's `variant` flag is
+  permanently flipped to `"changed"` by test 1's own regression run and never reset, so a baseline
+  captured via the ordinary `capturePage()` this late in the suite would already be showing the
+  regressed color — `captureCleanPage()` force-sets `.box` back to its original color client-side
+  first, the same way `captureRegressedPage()` force-sets it to the regressed color, so both stay
+  correct regardless of `variant`'s state. (Confirmed load-bearing by mutation testing
+  `applicable_masks()`'s call site in `backend/app/render.py`: before this fix, silently
+  hard-coding `masks = []` there did *not* fail these two tests, because the un-masked diff was
+  already within tolerance for an unrelated reason — baseline and candidate already matched.)
+- **Dogfooding**: rather than a separate script, this suite *is* the source of the images used to
+  dogfood the viewer on itself. `dogfoodCapture(page, name)` is a no-op unless
+  `PPS_DOGFOOD_SERVER_URL` is set; when it is, tests 2, 6, and 12 (which already drive the real
+  viewer through its key screens as part of their own assertions — run list, run detail, snapshot
+  detail in both Dual and Single view, Settings, Branches & Releases) also stash a snapshot of
+  that screen via the real `pixelperfectsnapshot` client. `afterAll` uploads every stashed
+  snapshot as one batch run against `PPS_DOGFOOD_SERVER_URL` (`PPS_DOGFOOD_TOKEN` optional) and
+  processes it — it never auto-approves; review and approval happen through that real, persistent
+  instance's own viewer, the same as any other snapshot in it. Snapshot names are fixed
+  (`dogfood-run-list`, `dogfood-snapshot-detail-dual`, …), so repeated suite runs diff against
+  whatever was previously approved for that name — there's nothing dogfood-specific about the
+  diffing itself. The point: a genuine layout regression in the viewer itself (the kind this
+  project has so far only caught by hand, via one-off Docker/Podman screenshots — an image
+  silently shrinking to its intrinsic size, a popup drifting off its anchor) becomes a real,
+  reviewable diff instead, the same way any other product's visual regression would surface. Left
+  unset (the default for `npm run test:e2e`), `dogfoodCapture()` returns immediately and nothing
+  about the suite's behavior changes.
 
 ## Commands
 
@@ -105,9 +123,10 @@ The test resolves the flask binary as: `PPS_FLASK` env var → `backend/.venv/bi
 start. `npm test` here is a stub (no unit tests) so the root workspace test run stays green
 without Python.
 
-To dogfood a real, persistent, already-deployed instance instead (see `dogfood-viewer.mjs` above):
+To also dogfood a real, persistent, already-deployed instance while the suite runs (see
+"Dogfooding" above):
 
 ```sh
-PPS_SERVER_URL=https://your-backend PPS_VIEWER_URL=https://your-viewer \
-  [PPS_API_TOKEN=...] npm run dogfood -w examples/demo-app
+PPS_DOGFOOD_SERVER_URL=https://your-backend [PPS_DOGFOOD_TOKEN=...] \
+  npm run test:e2e -w examples/demo-app
 ```
