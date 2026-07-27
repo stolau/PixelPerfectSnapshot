@@ -760,11 +760,15 @@ function MaskAssignmentMenu({
       data-testid="mask-scope-picker"
       className={`flex w-fit flex-wrap items-center gap-2 ${card} px-3 py-2 shadow-lg`}
     >
-      <button onClick={onSelectGlobal} className={btnSecondary}>
-        Save as global mask
+      <button onClick={onSelectGlobal} aria-label="Save as global mask" className={btnSecondary}>
+        +global
       </button>
-      <button onClick={onSelectSnapshot} className={btnSecondary}>
-        Save as mask for this snapshot
+      <button
+        onClick={onSelectSnapshot}
+        aria-label="Save as mask for this snapshot"
+        className={btnSecondary}
+      >
+        +unique
       </button>
       {existingCategories.length > 0 && (
         <span className="h-5 w-px bg-slate-300 dark:bg-slate-700" />
@@ -800,8 +804,12 @@ function MaskAssignmentMenu({
           + New category
         </button>
       )}
-      <button onClick={onCancel} className={btnGhost}>
-        Cancel
+      <button
+        onClick={onCancel}
+        aria-label="Cancel"
+        className="ml-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-red-600 text-sm font-bold leading-none text-white shadow hover:bg-red-700"
+      >
+        ×
       </button>
     </div>
   );
