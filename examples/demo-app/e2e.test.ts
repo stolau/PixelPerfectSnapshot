@@ -575,3 +575,109 @@ test(
   },
   240_000,
 );
+
+test(
+  "masks: multiple masks under the same category collapse to one count chip, not one per mask",
+  async () => {
+    if (serverUrl === "") throw new Error("the pipeline test must run (and pass) first");
+    if (viewerUrl === "") throw new Error("the viewer test must run (and pass) first");
+
+    const multiMaskRunId = (await createRun({ serverUrl })).id;
+    await sendSnapshots([await capturePage(siteUrl, undefined, "category-multi-mask-page")], {
+      serverUrl,
+      runId: multiMaskRunId,
+    });
+    await processRun({ serverUrl, runId: multiMaskRunId });
+    await fetch(`${serverUrl}/api/runs/${multiMaskRunId}/snapshots/category-multi-mask-page/approve`, {
+      method: "POST",
+    });
+
+    const context = await browser!.newContext({ viewport: { width: 1200, height: 700 } });
+    const page = await context.newPage();
+    await page.goto(viewerUrl, { waitUntil: "load" });
+
+    const runButtons = page.locator("ul li button");
+    await runButtons.first().waitFor();
+    await runButtons.first().click();
+    const multiMaskSnapshot = page.getByRole("button", { name: /^category-multi-mask-page/ });
+    await multiMaskSnapshot.waitFor();
+    await multiMaskSnapshot.click();
+    await page.getByText("Status: pass").waitFor();
+
+    const overlay = page.getByTestId("mask-overlay");
+    await page.waitForFunction(() => {
+      const img = document.querySelector<HTMLImageElement>('img[alt="candidate"]');
+      return img !== null && img.naturalWidth > 0;
+    });
+    const box = await overlay.boundingBox();
+    if (box === null) throw new Error("mask overlay not visible");
+
+    // First mask: create the category via "+ New category".
+    await page.mouse.move(box.x + 20, box.y + 20);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 80, box.y + 60);
+    await page.mouse.up();
+    await page.getByTestId("mask-scope-picker").waitFor();
+    await page.getByRole("button", { name: "+ New category" }).click();
+    await page.getByLabel("New category name").fill("E2E Multi Category");
+    await page.getByRole("button", { name: "Create & apply" }).click();
+    await page.getByTestId("mask-scope-picker").waitFor({ state: "detached" });
+    await page.getByText("E2E Multi Category (1)").waitFor();
+
+    // Second mask: same category now exists as a one-click option in the picker.
+    await page.mouse.move(box.x + 120, box.y + 100);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 180, box.y + 140);
+    await page.mouse.up();
+    await page.getByTestId("mask-scope-picker").waitFor();
+    await page.getByRole("button", { name: "E2E Multi Category" }).click();
+    await page.getByTestId("mask-scope-picker").waitFor({ state: "detached" });
+
+    // One collapsed chip with count 2 -- not two separate chips.
+    await page.getByText("E2E Multi Category (2)").waitFor();
+    expect(await page.getByText("E2E Multi Category (1)").count()).toBe(0);
+    expect(await page.getByText("E2E Multi Category (2)").count()).toBe(1);
+
+    await context.close();
+  },
+  240_000,
+);
+
+test(
+  "Approve checkmark is disabled once a snapshot is passing, verified against the real rendered page",
+  async () => {
+    if (serverUrl === "") throw new Error("the pipeline test must run (and pass) first");
+    if (viewerUrl === "") throw new Error("the viewer test must run (and pass) first");
+
+    const checkmarkRunId = (await createRun({ serverUrl })).id;
+    await sendSnapshots([await capturePage(siteUrl, undefined, "checkmark-pass-page")], {
+      serverUrl,
+      runId: checkmarkRunId,
+    });
+    await processRun({ serverUrl, runId: checkmarkRunId });
+    await fetch(`${serverUrl}/api/runs/${checkmarkRunId}/snapshots/checkmark-pass-page/approve`, {
+      method: "POST",
+    });
+
+    const context = await browser!.newContext({ viewport: { width: 1200, height: 700 } });
+    const page = await context.newPage();
+    await page.goto(viewerUrl, { waitUntil: "load" });
+
+    const runButtons = page.locator("ul li button");
+    await runButtons.first().waitFor();
+    await runButtons.first().click();
+    const checkmarkSnapshot = page.getByRole("button", { name: /^checkmark-pass-page/ });
+    await checkmarkSnapshot.waitFor();
+    await checkmarkSnapshot.click();
+    await page.getByText("Status: pass").waitFor();
+
+    // jsdom (the unit-test environment) can't render real layout/interactivity, so this is the
+    // only place "disabled" is proven against an actual rendered <button> in a real browser.
+    const approveButton = page.getByRole("button", { name: "Approve" });
+    await approveButton.waitFor();
+    expect(await approveButton.isDisabled()).toBe(true);
+
+    await context.close();
+  },
+  240_000,
+);
