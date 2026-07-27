@@ -758,7 +758,7 @@ function MaskAssignmentMenu({
   return (
     <div
       data-testid="mask-scope-picker"
-      className={`flex w-fit flex-wrap items-center gap-2 ${card} px-3 py-2`}
+      className={`flex w-fit flex-wrap items-center gap-2 ${card} px-3 py-2 shadow-lg`}
     >
       <button onClick={onSelectGlobal} className={btnSecondary}>
         Save as global mask
@@ -824,6 +824,13 @@ function InteractiveImagePane({
   drawStart,
   drawCurrent,
   onDeleteMask,
+  pendingRect,
+  existingCategories,
+  onSelectGlobal,
+  onSelectSnapshot,
+  onSelectCategory,
+  onCreateCategory,
+  onCancelPendingRect,
 }: {
   src: string;
   alt: string;
@@ -848,6 +855,13 @@ function InteractiveImagePane({
   drawStart: { x: number; y: number } | null;
   drawCurrent: { x: number; y: number } | null;
   onDeleteMask: (scope: MaskScope, id: number) => void;
+  pendingRect: { x: number; y: number; width: number; height: number } | null;
+  existingCategories: string[];
+  onSelectGlobal: () => void;
+  onSelectSnapshot: () => void;
+  onSelectCategory: (category: string) => void;
+  onCreateCategory: (category: string) => void;
+  onCancelPendingRect: () => void;
 }) {
   return (
     <div
@@ -918,6 +932,31 @@ function InteractiveImagePane({
           }}
         />
       )}
+      {pendingRect !== null &&
+        imgNaturalSize !== null &&
+        overlayRef.current !== null &&
+        (() => {
+          const scaleX = overlayRef.current.clientWidth / imgNaturalSize.width;
+          const scaleY = overlayRef.current.clientHeight / imgNaturalSize.height;
+          return (
+            <div
+              className="absolute z-10"
+              style={{
+                left: pendingRect.x * scaleX,
+                top: pendingRect.y * scaleY + pendingRect.height * scaleY + 8,
+              }}
+            >
+              <MaskAssignmentMenu
+                existingCategories={existingCategories}
+                onSelectGlobal={onSelectGlobal}
+                onSelectSnapshot={onSelectSnapshot}
+                onSelectCategory={onSelectCategory}
+                onCreateCategory={onCreateCategory}
+                onCancel={onCancelPendingRect}
+              />
+            </div>
+          );
+        })()}
     </div>
   );
 }
@@ -1197,6 +1236,13 @@ function SnapshotDetail({
                     drawStart={drawStart}
                     drawCurrent={drawCurrent}
                     onDeleteMask={deleteMask}
+                    pendingRect={pendingRect}
+                    existingCategories={existingCategories ?? []}
+                    onSelectGlobal={() => createMask("global")}
+                    onSelectSnapshot={() => createMask("per-image")}
+                    onSelectCategory={applyCategory}
+                    onCreateCategory={applyCategory}
+                    onCancelPendingRect={() => setPendingRect(null)}
                   />
                 ) : (
                   <div className="flex h-32 items-center justify-center text-sm text-slate-400">
@@ -1353,16 +1399,6 @@ function SnapshotDetail({
                   return chips;
                 })()}
               </div>
-            )}
-            {pendingRect !== null && (
-              <MaskAssignmentMenu
-                existingCategories={existingCategories ?? []}
-                onSelectGlobal={() => createMask("global")}
-                onSelectSnapshot={() => createMask("per-image")}
-                onSelectCategory={applyCategory}
-                onCreateCategory={applyCategory}
-                onCancel={() => setPendingRect(null)}
-              />
             )}
             {masksError !== null && <p className={alertError}>{masksError}</p>}
           </section>

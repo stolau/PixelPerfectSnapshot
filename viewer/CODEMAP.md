@@ -109,7 +109,12 @@ Consumes the backend HTTP API (`docs/API.md`).
   `newCategoryInput`/`showNewCategoryField` state — pure UI-input state scoped to the menu's own
   lifetime, unlike `pendingRect`) offering Global / This snapshot / one button per existing
   category (fetched via `listCategories()` when the menu opens, each with a `categoryColor()` dot)
-  / "+ New category" (inline name field). Picking an existing category or creating a new one both
+  / "+ New category" (inline name field). It renders as a floating popup **inside
+  `InteractiveImagePane`** (not in the Masks section below the image, where it used to live and
+  where it was easy to lose track of after drawing a box near the top of a tall image) —
+  positioned `absolute`, just below-left of the just-drawn `pendingRect`, using the exact same
+  natural-to-displayed `scaleX`/`scaleY` math already used to place saved mask rects, so it tracks
+  the actual on-screen box regardless of image size or dual/single view mode. Picking an existing category or creating a new one both
   route through `applyCategory()`, which — before creating the mask — PATCHes the snapshot's own
   `category` to match if it doesn't already (via `updateSnapshotCategory`), since
   `applicable_masks()` on the backend resolves category masks by *the snapshot's own* `category`
