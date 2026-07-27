@@ -13,3 +13,10 @@ h1 {
   background: #1a1a6e;
   border-radius: 8px;
 }
+
+.thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}

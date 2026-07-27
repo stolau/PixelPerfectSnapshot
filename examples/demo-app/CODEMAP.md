@@ -7,7 +7,10 @@ upload → render → diff → approve) against the real Flask backend.
 
 - `site/` — the demo page (`index.html`, `style.css`, `dot.png`). The `.box` rule's
   `#1a1a6e` background is the visual-regression target: the e2e test string-swaps it to
-  `#c0392b` to serve a "changed" variant.
+  `#c0392b` to serve a "changed" variant. `dot.png` is also reused 10x in a `.thumbs` gallery
+  (distinct `alt="dot-N"` per `<img>`, same underlying file — no need for 10 separate binary
+  assets) purely so a captured/rendered snapshot has more than one real `<img>` to look at when
+  browsing manually; none of the gallery images are referenced by any test assertion.
 - `e2e.test.ts` — vitest e2e suite, six tests **run in file declaration order, not
   independent**: each later test reuses the real Flask backend / demo site / browser / built
   viewer the earlier ones spawned, via module-level `let` state (`serverUrl`, `siteUrl`,
