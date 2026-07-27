@@ -63,6 +63,24 @@ upload → render → diff → approve) against the real Flask backend.
   thirteen tests reuse, since that would break all of their existing unauthenticated calls;
   confirms both that an unauthenticated request is genuinely rejected (`401`) and that the
   viewer's own Settings auth-token field unlocks the real, live flow end to end.
+- `dogfood-viewer.mjs` — a different kind of dogfooding than `e2e.test.ts`: instead of driving a
+  fully ephemeral, self-contained backend torn down at the end of the run, this points at a
+  **real, persistent, already-deployed** PixelPerfectSnapshot instance (`PPS_SERVER_URL` +
+  `PPS_VIEWER_URL` env vars, `PPS_API_TOKEN` optional) and captures a handful of the viewer's own
+  key pages (run list, run detail, snapshot detail dual/single, Settings, Branches & Releases) as
+  snapshots *of the product itself*, using the same `pixelperfectsnapshot` client any consumer
+  would. It never auto-approves — review and approval happen through that same real, deployed
+  viewer, the same as any other snapshot in it. Snapshot names are fixed
+  (`dogfood-run-list`, `dogfood-snapshot-detail-dual`, …), so repeated runs diff against whatever
+  was previously approved for that name; there's nothing dogfood-specific about the diffing
+  itself. Each run also seeds a small amount of fresh, `dogfood-`-prefixed demo data (a passing
+  baseline plus a genuine regression against it) so the captured pages always have something real
+  to render, even against a brand-new instance — this accumulates across repeated runs the same
+  way any product's real usage would; the script makes no attempt to manage retention. The point:
+  a genuine layout regression in the viewer itself (the kind this project has so far only caught
+  by hand, via one-off Docker/Podman screenshots — an image silently shrinking to its intrinsic
+  size, a popup drifting off its anchor) becomes a real, reviewable diff instead, the same way any
+  other product's visual regression would surface.
 
 ## Commands
 
@@ -86,3 +104,10 @@ The test resolves the flask binary as: `PPS_FLASK` env var → `backend/.venv/bi
 `flask` on PATH, and fails fast with the setup instructions above when the flask binary can't
 start. `npm test` here is a stub (no unit tests) so the root workspace test run stays green
 without Python.
+
+To dogfood a real, persistent, already-deployed instance instead (see `dogfood-viewer.mjs` above):
+
+```sh
+PPS_SERVER_URL=https://your-backend PPS_VIEWER_URL=https://your-viewer \
+  [PPS_API_TOKEN=...] npm run dogfood -w examples/demo-app
+```
