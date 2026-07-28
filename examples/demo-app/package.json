@@ -6,8 +6,7 @@
     "lint": "tsc --noEmit",
     "test": "echo \"demo-app has no unit tests; run the e2e suite: npm run test:e2e (needs Python backend, see CODEMAP.md)\"",
     "pretest:e2e": "playwright install chromium && VITE_API_BASE=/backend npm --prefix ../../viewer exec -- vite build ../../viewer",
-    "test:e2e": "vitest run",
-    "dogfood": "node dogfood-viewer.mjs"
+    "test:e2e": "vitest run"
   },
   "dependencies": {
     "pixelperfectsnapshot": "0.1.0"
