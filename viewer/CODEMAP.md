@@ -52,11 +52,25 @@ Consumes the backend HTTP API (`docs/API.md`).
   filtered subset. A filtered `RunList` shows a "Branch: <id>" / "Release: <id>" heading and a
   "Back" button (to `ScopesView`); the `filter` (and, deeper in, the originating `runId`/`name`)
   thread through `run` → `snapshot` view navigation so "Back" from a snapshot two levels deep
-  returns to the *filtered* run list it came from, not the unfiltered one. Read-only by design —
-  no merge-to-master or cut-release actions from the viewer; those stay curl/CI-only, and once a
-  scoped run is open, baseline resolution for its images is already fully transparent server-side
-  (`scoped_baseline_read_path()`), so `RunDetail`/`SnapshotDetail` needed zero changes to work
-  correctly for scoped runs — this feature is purely about *getting to* the right runs.
+  returns to the *filtered* run list it came from, not the unfiltered one. Each branch row also
+  has a sibling "Merge to master" button (`POST /api/branches/:id/merge`) and the Releases card
+  has an inline "New release id" text input + "Cut release" button (`POST /api/releases`) to seed
+  a release from current master baselines — both fire immediately on click with no confirm dialog,
+  matching this app's existing immediate-fire write-action convention (approve, process, rename,
+  delete, etc. all skip confirmation too). While a merge is in flight, **every** branch row's
+  merge button disables, not just the clicked one — `mergingBranch` is a single piece of state
+  shared across all rows, so disabling only the clicked row would let a second branch's merge
+  start concurrently and its response corrupt the shared `mergeResult`/`mergeError` state if the
+  two requests resolved out of order. The clicked row's button also swaps its label to "Merging…".
+  Merge shows the server's `{merged, count}` result as "Merged N baseline(s) from <branch> to
+  master"; cut-release shows `{id, fileCount, seededFrom}` as "Cut release <id> (N baseline(s)
+  seeded from <scope>)" and refetches `listReleases()` on success so the new release appears in
+  the list immediately. A failed release submission leaves the typed id in the input (only cleared
+  on success) so it can be fixed and resubmitted; the only client-side validation is disabling
+  "Cut release" while the input is empty. Once a scoped run is open, baseline resolution for its
+  images is already fully transparent server-side (`scoped_baseline_read_path()`), so
+  `RunDetail`/`SnapshotDetail` needed zero changes to work correctly for scoped runs — this
+  feature is purely about *getting to* the right runs.
 
   **Snapshot detail** is laid out to keep the image itself the visual focus, as large as the
   available width allows: a single top bar holds the status pill, the Dual/Single toggle, "Show

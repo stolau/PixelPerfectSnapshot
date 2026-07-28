@@ -626,6 +626,114 @@ test(
 );
 
 test(
+  "Branches & Releases: merging a branch copies its approved baseline to master",
+  async () => {
+    if (serverUrl === "") throw new Error("the pipeline test must run (and pass) first");
+    if (viewerUrl === "") throw new Error("the viewer test must run (and pass) first");
+
+    // createRun() has no scope support -- go around the client library, same as the scoped-run
+    // approval test above. "merge-e2e-branch"/"merge-e2e-page" are fresh names used nowhere else
+    // in this file: reusing an established name here would mean the merge below silently
+    // overwrites that other name's already-established master baseline, and it's exactly the
+    // freshness that makes this test's independent verification below non-vacuous.
+    const mergeRunRes = await fetch(`${serverUrl}/api/runs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope: { kind: "branch", id: "merge-e2e-branch" } }),
+    });
+    expect(mergeRunRes.status).toBe(201);
+    const mergeRunId = (await mergeRunRes.json()).id as string;
+    await sendSnapshots([await capturePage(siteUrl, undefined, "merge-e2e-page")], {
+      serverUrl,
+      runId: mergeRunId,
+    });
+    await processRun({ serverUrl, runId: mergeRunId });
+    const approveRes = await fetch(
+      `${serverUrl}/api/runs/${mergeRunId}/snapshots/merge-e2e-page/approve`,
+      { method: "POST" },
+    );
+    expect(approveRes.status).toBe(200);
+
+    const context = await browser!.newContext({ viewport: { width: 1200, height: 700 } });
+    const page = await context.newPage();
+    await page.goto(viewerUrl, { waitUntil: "load" });
+
+    await page.getByRole("button", { name: "Branches & Releases" }).click();
+    await page.getByRole("heading", { name: "Branches & Releases" }).waitFor();
+    const branchButton = page.getByRole("button", { name: "merge-e2e-branch" });
+    await branchButton.waitFor();
+    // Scope to this branch's own row -- Branches & Releases may list other branches accumulated
+    // from earlier tests against this same shared backend, each with its own "Merge to master".
+    const branchRow = branchButton.locator("xpath=..");
+    await branchRow.getByRole("button", { name: "Merge to master" }).click();
+    await page.getByText("Merged 1 baseline(s) from merge-e2e-branch to master").waitFor();
+
+    await context.close();
+
+    // Independent verification (the real proof): "merge-e2e-page" has no master baseline of its
+    // own before this merge (see the freshness note above), so a brand-new, wholly UNSCOPED run
+    // for the same page can only come back "pass" if the merge genuinely copied the approved
+    // branch baseline's bytes to master's own baseline path. scoped_baseline_read_path() (see
+    // backend/app/render.py) resolves an unscoped run's baseline straight from that master path
+    // with no branch fallback involved, so a broken/no-op merge would leave this
+    // "approved-baseline-missing" instead of "pass".
+    const verifyRunId = (await createRun({ serverUrl })).id;
+    await sendSnapshots([await capturePage(siteUrl, undefined, "merge-e2e-page")], {
+      serverUrl,
+      runId: verifyRunId,
+    });
+    await processRun({ serverUrl, runId: verifyRunId });
+    const verifyRes = await fetch(`${serverUrl}/api/runs/${verifyRunId}/snapshots/merge-e2e-page`);
+    expect(verifyRes.status).toBe(200);
+    expect((await verifyRes.json()).status).toBe("pass");
+  },
+  240_000,
+);
+
+test(
+  "Branches & Releases: cutting a release seeds it from master and it becomes a run-list scope filter",
+  async () => {
+    if (serverUrl === "") throw new Error("the pipeline test must run (and pass) first");
+    if (viewerUrl === "") throw new Error("the viewer test must run (and pass) first");
+
+    const context = await browser!.newContext({ viewport: { width: 1200, height: 700 } });
+    const page = await context.newPage();
+    await page.goto(viewerUrl, { waitUntil: "load" });
+
+    await page.getByRole("button", { name: "Branches & Releases" }).click();
+    await page.getByRole("heading", { name: "Branches & Releases" }).waitFor();
+    await page.getByLabel("New release id").fill("e2e-release-1");
+    await page.getByRole("button", { name: "Cut release" }).click();
+    await page.getByText(/^Cut release e2e-release-1 /).waitFor();
+    const releaseButton = page.getByRole("button", { name: /^e2e-release-1 —/ });
+    await releaseButton.waitFor();
+
+    const releaseRunRes = await fetch(`${serverUrl}/api/runs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope: { kind: "release", id: "e2e-release-1" } }),
+    });
+    expect(releaseRunRes.status).toBe(201);
+    const releaseRunId = (await releaseRunRes.json()).id as string;
+    await sendSnapshots([await capturePage(siteUrl, undefined, "release-e2e-page")], {
+      serverUrl,
+      runId: releaseRunId,
+    });
+    await processRun({ serverUrl, runId: releaseRunId });
+
+    await releaseButton.click();
+    await page.getByRole("heading", { name: "Release: e2e-release-1" }).waitFor();
+    const runButtons = page.locator("ul li button");
+    await runButtons.first().waitFor();
+    expect(await runButtons.count()).toBe(1);
+    await page.getByText("1 snapshots").waitFor();
+
+    await context.close();
+  },
+  240_000,
+);
+
+test(
   "bulk approve: selecting two new snapshots approves both against the live backend",
   async () => {
     if (serverUrl === "") throw new Error("the pipeline test must run (and pass) first");

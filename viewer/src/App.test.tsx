@@ -19,6 +19,9 @@ interface Route {
   body?: unknown;
   /** When true, respond with a Blob body instead of JSON — for AuthenticatedImage fetches. */
   blob?: boolean;
+  /** When set, fetchMock resolves with this promise instead of building a Response itself —
+   * lets a test hold a request pending until it explicitly resolves it. */
+  deferred?: Promise<Response>;
 }
 
 function blobRoute(status?: number): Route {
@@ -52,6 +55,7 @@ beforeEach(() => {
     if (route === undefined) {
       return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
     }
+    if (route.deferred !== undefined) return route.deferred;
     if (route.blob === true) {
       return new Response(new Blob(["fake-image-bytes"]), { status: route.status ?? 200 });
     }
@@ -330,6 +334,120 @@ test("Branches & Releases shows empty states when nothing exists yet", async () 
 
   await screen.findByText("No branch-scoped runs yet.");
   expect(screen.getByText("No releases yet.")).toBeDefined();
+});
+
+async function openBranchesAndReleases() {
+  render(<App />);
+  await screen.findByText(/Jul 15, 09:30/);
+  fireEvent.click(screen.getByRole("button", { name: "Branches & Releases" }));
+  await screen.findByRole("heading", { name: "Branches & Releases" });
+}
+
+test("Merge to master POSTs to the branch merge endpoint and shows the success count", async () => {
+  routes["GET /api/branches"] = { body: { branches: ["feature-x"] } };
+  routes["GET /api/releases"] = { body: { releases: [] } };
+  routes["POST /api/branches/feature-x/merge"] = {
+    body: { merged: ["checkout-page"], count: 1 },
+  };
+  await openBranchesAndReleases();
+
+  fireEvent.click(await screen.findByRole("button", { name: "Merge to master" }));
+
+  await screen.findByText("Merged 1 baseline(s) from feature-x to master");
+  expect(requests()).toContainEqual({
+    method: "POST",
+    url: "/api/branches/feature-x/merge",
+  });
+});
+
+test("Merge to master failure shows the error via alertError styling and no stale success line", async () => {
+  routes["GET /api/branches"] = { body: { branches: ["feature-x"] } };
+  routes["GET /api/releases"] = { body: { releases: [] } };
+  routes["POST /api/branches/feature-x/merge"] = {
+    status: 500,
+    body: { error: "merge conflict" },
+  };
+  await openBranchesAndReleases();
+
+  fireEvent.click(await screen.findByRole("button", { name: "Merge to master" }));
+
+  const errorEl = await screen.findByText("Merge failed (500): merge conflict");
+  expect(errorEl.className).toMatch(/bg-red-50/);
+  expect(errorEl.className).toMatch(/text-red-700/);
+  expect(screen.queryByText(/^Merged /)).toBeNull();
+});
+
+test("Cut release POSTs the typed id, shows the success line, and clears the input", async () => {
+  routes["GET /api/branches"] = { body: { branches: [] } };
+  routes["GET /api/releases"] = { body: { releases: [] } };
+  routes["POST /api/releases"] = {
+    body: { id: "v2", createdAt: "2026-07-20T10:00:00Z", seededFrom: "master", fileCount: 3 },
+  };
+  await openBranchesAndReleases();
+  const input = (await screen.findByLabelText("New release id")) as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "v2" } });
+
+  fireEvent.click(screen.getByRole("button", { name: "Cut release" }));
+
+  await screen.findByText("Cut release v2 (3 baseline(s) seeded from master)");
+  expect(requestBody("POST", "/api/releases")).toEqual({ id: "v2" });
+  expect(input.value).toBe("");
+});
+
+test("Cut release failure (409) shows the error and leaves the typed input intact", async () => {
+  routes["GET /api/branches"] = { body: { branches: [] } };
+  routes["GET /api/releases"] = { body: { releases: [] } };
+  routes["POST /api/releases"] = {
+    status: 409,
+    body: { error: "release id already exists" },
+  };
+  await openBranchesAndReleases();
+  const input = (await screen.findByLabelText("New release id")) as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "v1" } });
+
+  fireEvent.click(screen.getByRole("button", { name: "Cut release" }));
+
+  const errorEl = await screen.findByText("Cut release failed (409): release id already exists");
+  expect(errorEl.className).toMatch(/bg-red-50/);
+  expect(errorEl.className).toMatch(/text-red-700/);
+  expect(input.value).toBe("v1");
+});
+
+test("while one branch's merge is in flight, every branch's Merge button disables (not just the clicked one)", async () => {
+  routes["GET /api/branches"] = { body: { branches: ["feature-x", "feature-y"] } };
+  routes["GET /api/releases"] = { body: { releases: [] } };
+  let resolveMerge!: (response: Response) => void;
+  routes["POST /api/branches/feature-x/merge"] = {
+    deferred: new Promise<Response>((resolve) => {
+      resolveMerge = resolve;
+    }),
+  };
+  await openBranchesAndReleases();
+  const mergeButtons = (await screen.findAllByRole("button", {
+    name: "Merge to master",
+  })) as HTMLButtonElement[];
+  expect(mergeButtons.length).toBe(2);
+
+  fireEvent.click(mergeButtons[0]); // feature-x
+
+  // The clicked row's button swaps its label and disables...
+  const mergingButton = (await screen.findByRole("button", {
+    name: "Merging…",
+  })) as HTMLButtonElement;
+  expect(mergingButton.disabled).toBe(true);
+  // ...and, load-bearing: the OTHER (unclicked) branch's button disables too, since a second
+  // concurrent merge could otherwise resolve out of order and corrupt the shared result state.
+  const otherButton = screen.getByRole("button", { name: "Merge to master" }) as HTMLButtonElement;
+  expect(otherButton.disabled).toBe(true);
+
+  resolveMerge(new Response(JSON.stringify({ merged: ["a"], count: 1 }), { status: 200 }));
+
+  await screen.findByText("Merged 1 baseline(s) from feature-x to master");
+  const buttonsAfter = screen.getAllByRole("button", {
+    name: "Merge to master",
+  }) as HTMLButtonElement[];
+  expect(buttonsAfter.length).toBe(2);
+  expect(buttonsAfter.every((b) => !b.disabled)).toBe(true);
 });
 
 test("run detail renders each snapshot's name and status", async () => {
