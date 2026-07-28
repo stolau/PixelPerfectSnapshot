@@ -505,6 +505,71 @@ test(
 );
 
 test(
+  "masks: a pre-existing per-image mask (created outside the browser session) is deletable through the viewer",
+  async () => {
+    if (serverUrl === "") throw new Error("the pipeline test must run (and pass) first");
+    if (viewerUrl === "") throw new Error("the viewer test must run (and pass) first");
+
+    const ownMaskRunId = (await createRun({ serverUrl })).id;
+    const ownMaskSnapshot = await capturePage(siteUrl, undefined, "own-mask-page");
+    await sendSnapshots([ownMaskSnapshot], { serverUrl, runId: ownMaskRunId });
+    await processRun({ serverUrl, runId: ownMaskRunId });
+
+    // Create the per-image mask via a raw fetch POST, not by drawing it live in the browser --
+    // this genuinely simulates a mask that predates/is outside the current browser session, the
+    // exact scenario the session-tracked createdMasks state can't cover.
+    const createRes = await fetch(
+      `${serverUrl}/api/runs/${ownMaskRunId}/snapshots/own-mask-page/masks`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ x: 20, y: 20, width: 80, height: 60 }),
+      },
+    );
+    expect(createRes.status).toBe(201);
+    const ownMaskId = (await createRes.json()).id as number;
+
+    const context = await browser!.newContext({ viewport: { width: 1200, height: 700 } });
+    const page = await context.newPage();
+    await page.goto(viewerUrl, { waitUntil: "load" });
+
+    const runButtons = page.locator("ul li button");
+    await runButtons.first().waitFor();
+    await runButtons.first().click();
+    const ownMaskSnapshotButton = page.getByRole("button", { name: /^own-mask-page/ });
+    await ownMaskSnapshotButton.waitFor();
+    await ownMaskSnapshotButton.click();
+    await page.getByText("Status: approved-baseline-missing").waitFor();
+
+    await page.waitForFunction(() => {
+      const img = document.querySelector<HTMLImageElement>('img[alt="candidate"]');
+      return img !== null && img.naturalWidth > 0;
+    });
+
+    // The delete control must render from the /masks/own fetch alone -- this mask was never
+    // created through this page, so it has no entry in the component's session-tracked
+    // createdMasks.
+    const deleteButton = page.getByTestId(`mask-delete-per-image-${ownMaskId}`);
+    await deleteButton.waitFor();
+    expect(await page.getByTestId("mask-rect").count()).toBe(1);
+
+    await deleteButton.click();
+    await page.waitForFunction(() => document.querySelector('[data-testid="mask-rect"]') === null);
+    expect(await page.getByTestId("mask-rect").count()).toBe(0);
+
+    // Independently verify it's actually gone server-side too, not just removed from the UI.
+    const ownMasksRes = await fetch(
+      `${serverUrl}/api/runs/${ownMaskRunId}/snapshots/own-mask-page/masks/own`,
+    );
+    expect(ownMasksRes.status).toBe(200);
+    expect((await ownMasksRes.json()).masks).toEqual([]);
+
+    await context.close();
+  },
+  240_000,
+);
+
+test(
   "Branches & Releases: a scoped run's approval is visible through the filtered list",
   async () => {
     if (serverUrl === "") throw new Error("the pipeline test must run (and pass) first");

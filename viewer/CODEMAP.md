@@ -133,26 +133,31 @@ Consumes the backend HTTP API (`docs/API.md`).
   itself requires no snapshot still be tagged with it) — a deliberate, author-confirmed tradeoff,
   not an oversight, mirroring the earlier approve-on-`pass` tradeoff above.
 
-  Delete is available only for masks whose id can be proven: global and category masks
-  (cross-referenced against `GET /api/masks` / `GET /api/categories/<category>/masks`) and masks
-  created in the current browser session (tracked client-side from their create response,
-  deduplicated by identity against refetched global/category masks to avoid double-binding when
-  duplicate-rect masks exist). Pre-existing per-image masks — fetched only via the id-less combined
-  endpoint and not created this session — have no delete button, because no endpoint lists
-  per-image masks together with their ids. This is a known limitation of the current (frozen) API
-  surface, not a bug. `resolveMaskIds()` takes all three id-bearing pools (session-created, global,
-  category) and binds each rendered rect to a `{scope, id}` by identity, where `scope` is
-  `"global" | "per-image" | "category"`.
+  Delete is available for masks whose id can be proven: global masks (cross-referenced against
+  `GET /api/masks`), category masks (`GET /api/categories/<category>/masks`), per-image masks
+  (`GET /api/runs/<run_id>/snapshots/<name>/masks/own`), and masks created in the current browser
+  session (tracked client-side from their create response, deduplicated by identity against
+  refetched global/category/own masks to avoid double-binding when duplicate-rect masks exist).
+  Pre-existing per-image masks used to have no delete button, because the only per-image-scoped
+  endpoint was the id-less combined `GET .../masks` — that was a known limitation of the API
+  surface, fixed by adding the `.../masks/own` endpoint above; per-image masks are now deletable
+  the same as any other scope. `resolveMaskIds()` takes all four id-bearing pools (session-created
+  `createdMasks`, `globalMasks`, `categoryMasks`, `ownMasks`) and binds each rendered rect to a
+  `{scope, id}` by identity, where `scope` is `"global" | "per-image" | "category"`.
 
   Applicable masks — previously visible **only** as overlay rectangles on the candidate image
   itself, with no indication anywhere else that a snapshot had any masks at all — now also render
   as a row of chips below the image. Global and per-image masks each get their own Instagram-style
   hashtag chip (`#global`, `#this image`), colored via `MASK_SCOPE_DOT` (two fixed constants, since
   neither scope has a name to hash) — a chip's binding is resolved the same way as its overlay rect
-  (`resolveMaskIds()`, called a second time in `SnapshotDetail` against the same inputs); a rect
-  with no resolved binding is inferred to be scope `"per-image"` by elimination (global/category
-  pools are always fully enumerated with ids, so an unmatched rect can't be either) and renders its
-  chip with no remove control, mirroring the overlay rect's own missing delete button exactly.
+  (`resolveMaskIds()`, called a second time in `SnapshotDetail` against the same inputs). All four
+  pools are now fully enumerated with ids from their own list endpoints, so in steady state every
+  rendered rect resolves to a binding; a rect with no resolved binding falls back to scope
+  `"per-image"` (`maskChipScope()`), which is purely defensive at this point — covering a transient
+  race where the combined-list fetch (which produces the rendered rects) and the own-list fetch
+  (which populates `ownMasks`) resolve asynchronously at different times — not a structural gap,
+  and its chip renders with no remove control in that transient case, mirroring the overlay rect's
+  own state.
   **Category-scope masks collapse to a single chip**, not one per mask: `{category} ({count})`,
   `categoryColor(name).dot`-colored, no `#` prefix, no remove control — a category is a preset
   bundle applied as one unit, not a set of individually-taggable masks, so the UI treats it that
@@ -206,7 +211,9 @@ Consumes the backend HTTP API (`docs/API.md`).
   CRUD: `Mask` (has `id`) and `MaskRect` (no `id`, the shape returned by the combined per-snapshot
   masks endpoint) types, plus `listGlobalMasks()` / `createGlobalMask(rect)` /
   `deleteGlobalMask(id)` for global masks, `listSnapshotMasks(id, name)` / `createSnapshotMask(id,
-  name, rect)` / `deleteSnapshotMask(id, name, maskId)` for per-image masks, and
+  name, rect)` / `deleteSnapshotMask(id, name, maskId)` for per-image masks,
+  `listOwnSnapshotMasks(id, name)` (`GET .../masks/own`, `Mask[]` with `id`s — a per-row listing of
+  just this snapshot's own per-image masks, unlike `listSnapshotMasks`'s id-less combined view), and
   `listCategoryMasks(category)` / `createCategoryMask(category, rect)` /
   `deleteCategoryMask(category, id)` for category masks (category is `encodeURIComponent`-escaped
   into the URL path, so categories containing spaces or other reserved characters work).

@@ -35,6 +35,7 @@ beforeEach(() => {
     [`GET ${SNAPSHOT_URL}`]: { body: snapshotDetailFixture },
     [`GET ${SNAPSHOT_URL}/history`]: { body: { history: [] } },
     [`GET ${SNAPSHOT_URL}/masks`]: { body: { masks: [] } },
+    [`GET ${SNAPSHOT_URL}/masks/own`]: { body: { masks: [] } },
     "GET /api/masks": { body: { masks: [] } },
     "GET /api/categories": { body: { categories: [] } },
     // AuthenticatedImage fetches these directly; most tests that swap in the rendered snapshot
@@ -683,6 +684,32 @@ test("mask overlay renders existing masks; only id-known masks get a delete butt
   expect(rects.length).toBe(2);
   expect(screen.getByTestId("mask-delete-global-7")).toBeDefined();
   expect(screen.getAllByRole("button", { name: "Delete mask" }).length).toBe(1);
+});
+
+test("a pre-existing per-image mask (not in this session's createdMasks) still gets a working delete control", async () => {
+  routes[`GET ${SNAPSHOT_URL}`] = { body: snapshotDetailRenderedFixture };
+  const rect = { x: 10, y: 20, width: 30, height: 40 };
+  routes[`GET ${SNAPSHOT_URL}/masks`] = { body: { masks: [rect] } };
+  routes[`GET ${SNAPSHOT_URL}/masks/own`] = { body: { masks: [{ id: 99, ...rect }] } };
+  routes[`DELETE ${SNAPSHOT_URL}/masks/99`] = { status: 204, body: undefined };
+  await openSnapshotDetail();
+
+  const img = await screen.findByAltText("candidate");
+  fireEvent.load(img);
+
+  // This mask was never created through this browser session (no matching entry was ever
+  // returned from a POST .../masks call this session), so createdMasks alone can't resolve it --
+  // only the /masks/own fetch can. That's exactly the regression this proves.
+  const deleteButton = await screen.findByTestId("mask-delete-per-image-99");
+
+  routes[`GET ${SNAPSHOT_URL}/masks`] = { body: { masks: [] } };
+  routes[`GET ${SNAPSHOT_URL}/masks/own`] = { body: { masks: [] } };
+  fireEvent.click(deleteButton);
+
+  await waitFor(() => {
+    expect(screen.queryByTestId("mask-rect")).toBeNull();
+  });
+  expect(requests()).toContainEqual({ method: "DELETE", url: `${SNAPSHOT_URL}/masks/99` });
 });
 
 test("candidate image is not natively draggable, so drawing a mask doesn't drag/select instead", async () => {

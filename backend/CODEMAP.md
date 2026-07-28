@@ -90,6 +90,10 @@ approved baselines. HTTP contract: `docs/API.md`. Upload payload contract:
   `GET /api/runs/<run_id>/snapshots/<name>/masks` (the resolved, combined view via
   `applicable_masks()` — global masks plus this snapshot's per-image masks plus, when the snapshot
   has a `category`, that category's masks; 404 unknown run or name),
+  `GET /api/runs/<run_id>/snapshots/<name>/masks/own` (a per-row listing, with `id`s, of just this
+  snapshot's own per-image masks — `name = ? AND viewport_width = ? AND viewport_height = ?` against
+  the resolved snapshot, unlike the combined endpoint above which has no `id`s; 404 unknown run or
+  name),
   `POST /api/runs/<run_id>/snapshots/<name>/masks` (creates a per-image mask keyed by the
   snapshot's (name, viewport), like a baseline — applies to every future run of that test case;
   400 if the mask exceeds the resolved snapshot's viewport bounds; 404 unknown run or name),
