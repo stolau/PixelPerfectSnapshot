@@ -274,3 +274,29 @@ export function deleteCategoryMask(category: string, id: number): Promise<void> 
     method: "DELETE",
   });
 }
+
+export interface MergeResult {
+  merged: string[];
+  count: number;
+}
+
+export function mergeBranch(branchId: string): Promise<MergeResult> {
+  return request<MergeResult>(`/api/branches/${encodeURIComponent(branchId)}/merge`, {
+    method: "POST",
+  });
+}
+
+export interface CreateReleaseResult {
+  id: string;
+  createdAt: string;
+  seededFrom: string;
+  fileCount: number;
+}
+
+export function createRelease(id: string): Promise<CreateReleaseResult> {
+  return request<CreateReleaseResult>("/api/releases", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
+}

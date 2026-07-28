@@ -4,6 +4,7 @@ import {
   ApiError,
   createCategoryMask,
   createGlobalMask,
+  createRelease,
   createSnapshotMask,
   deleteCategory,
   deleteCategoryMask,
@@ -22,6 +23,7 @@ import {
   listReleases,
   listRuns,
   listSnapshotMasks,
+  mergeBranch,
   processRun,
   renameCategory,
   updateSnapshotCategory,
@@ -451,6 +453,19 @@ function ScopesView({
   const [branches, setBranches] = useState<string[] | null>(null);
   const [releases, setReleases] = useState<ReleaseSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [mergingBranch, setMergingBranch] = useState<string | null>(null);
+  const [mergeResult, setMergeResult] = useState<{ branchId: string; count: number } | null>(
+    null,
+  );
+  const [mergeError, setMergeError] = useState<string | null>(null);
+  const [newReleaseId, setNewReleaseId] = useState("");
+  const [creatingRelease, setCreatingRelease] = useState(false);
+  const [releaseResult, setReleaseResult] = useState<{
+    id: string;
+    fileCount: number;
+    seededFrom: string;
+  } | null>(null);
+  const [releaseError, setReleaseError] = useState<string | null>(null);
 
   useEffect(() => {
     listBranches().then(setBranches, (err: Error) => setError(err.message));
@@ -459,6 +474,45 @@ function ScopesView({
   useEffect(() => {
     listReleases().then(setReleases, (err: Error) => setError(err.message));
   }, []);
+
+  async function handleMerge(id: string) {
+    setMergeResult(null);
+    setMergeError(null);
+    setMergingBranch(id);
+    try {
+      const result = await mergeBranch(id);
+      setMergeResult({ branchId: id, count: result.count });
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setMergeError(`Merge failed (${err.status}): ${err.message}`);
+      } else {
+        setMergeError(`Merge failed: ${(err as Error).message}`);
+      }
+    } finally {
+      setMergingBranch(null);
+    }
+  }
+
+  async function handleCreateRelease() {
+    setReleaseResult(null);
+    setReleaseError(null);
+    setCreatingRelease(true);
+    try {
+      const result = await createRelease(newReleaseId.trim());
+      setReleaseResult({ id: result.id, fileCount: result.fileCount, seededFrom: result.seededFrom });
+      setNewReleaseId("");
+      const list = await listReleases();
+      setReleases(list);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setReleaseError(`Cut release failed (${err.status}): ${err.message}`);
+      } else {
+        setReleaseError(`Cut release failed: ${(err as Error).message}`);
+      }
+    } finally {
+      setCreatingRelease(false);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -475,12 +529,27 @@ function ScopesView({
         ) : (
           <div className="flex flex-wrap gap-2">
             {branches.map((id) => (
-              <button key={id} onClick={() => onSelectBranch(id)} className={btnSecondary}>
-                {id}
-              </button>
+              <div key={id} className="flex items-center gap-2">
+                <button onClick={() => onSelectBranch(id)} className={btnSecondary}>
+                  {id}
+                </button>
+                <button
+                  onClick={() => handleMerge(id)}
+                  disabled={mergingBranch !== null}
+                  className={btnSecondary}
+                >
+                  {id === mergingBranch ? "Merging…" : "Merge to master"}
+                </button>
+              </div>
             ))}
           </div>
         )}
+        {mergeResult !== null && (
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            Merged {mergeResult.count} baseline(s) from {mergeResult.branchId} to master
+          </p>
+        )}
+        {mergeError !== null && <p className={alertError}>{mergeError}</p>}
       </section>
       <section className={`${card} flex flex-col gap-3 p-4`}>
         <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
@@ -503,6 +572,29 @@ function ScopesView({
             ))}
           </div>
         )}
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={newReleaseId}
+            onChange={(e) => setNewReleaseId(e.target.value)}
+            aria-label="New release id"
+            className="w-40 rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 focus:border-slate-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+          />
+          <button
+            onClick={handleCreateRelease}
+            disabled={newReleaseId.trim() === "" || creatingRelease}
+            className={btnSecondary}
+          >
+            Cut release
+          </button>
+        </div>
+        {releaseResult !== null && (
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            Cut release {releaseResult.id} ({releaseResult.fileCount} baseline(s) seeded from{" "}
+            {releaseResult.seededFrom})
+          </p>
+        )}
+        {releaseError !== null && <p className={alertError}>{releaseError}</p>}
       </section>
     </div>
   );
