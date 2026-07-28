@@ -11,7 +11,7 @@ upload → render → diff → approve) against the real Flask backend.
   (distinct `alt="dot-N"` per `<img>`, same underlying file — no need for 10 separate binary
   assets) purely so a captured/rendered snapshot has more than one real `<img>` to look at when
   browsing manually; none of the gallery images are referenced by any test assertion.
-- `e2e.test.ts` — vitest e2e suite, sixteen tests, **run in file declaration order, not
+- `e2e.test.ts` — vitest e2e suite, seventeen tests, **run in file declaration order, not
   independent**: each later test reuses the real Flask backend / demo site / browser / built
   viewer the earlier ones spawned, via module-level `let` state (`serverUrl`, `siteUrl`,
   `viewerUrl`, `browser`, `dataDir`, …) — every test past the first two opens with an explicit
@@ -22,8 +22,12 @@ upload → render → diff → approve) against the real Flask backend.
   asserts pass/fail/approve behavior — pure API-level, no browser UI) and "viewer against the live
   backend" (drives the **built** viewer in a real browser; `pretest:e2e` builds it with
   `VITE_API_BASE=/backend` so requests/image srcs target the backend through a same-origin
-  proxy this file runs itself — see below). Tests 3-8 extend that same shared pipeline to cover
-  masks (drag-draw + save-as-global + delete against a real rendered image), Branches & Releases
+  proxy this file runs itself — see below). Tests 3-9 extend that same shared pipeline to cover
+  masks (drag-draw + save-as-global + delete against a real rendered image), a pre-existing
+  per-image mask created outside the browser session entirely — via a raw `fetch` POST straight to
+  the backend, not drawn live — still surfacing a working delete control through the viewer's
+  `GET .../masks/own` fetch and genuinely disappearing server-side once deleted (the exact case
+  the session-tracked `createdMasks` state can't cover), Branches & Releases
   (a branch-scoped run created via a raw `fetch` — `createRun()` has no `scope` param — approved,
   then found through the viewer's filtered list), bulk approve (two new snapshots, both
   checkbox-selected and approved in one action), category management (tag via the mask-assignment
@@ -37,13 +41,13 @@ upload → render → diff → approve) against the real Flask backend.
   genuine DOM element rather than React Testing Library's simulated one. `capturePage()` takes an
   optional `name` param (default `"demo-page"`, so tests 1-2's calls are unchanged) so later tests
   can use distinctly-named snapshots and avoid colliding with tests 1-2's own baseline/approval
-  state in the shared data dir. The in-file viewer proxy (started by test 2, reused by tests 3-16)
+  state in the shared data dir. The in-file viewer proxy (started by test 2, reused by tests 3-17)
   forwards the request body and `Content-Type` for any method — not just the bodyless
   `POST .../approve` the original two-test suite ever sent through it — since mask creation and
   category rename both need a real JSON body to reach the backend through the live viewer's own
   `fetch()` calls.
 
-  Tests 9-14 close six more live-coverage gaps, each picked because the behavior shipped in a
+  Tests 10-15 close six more live-coverage gaps, each picked because the behavior shipped in a
   recent PR but was previously proven only by a mocked-fetch unit test or a one-off manual Docker
   screenshot, never by this suite: deleting a mask via its hashtag chip's own remove control (not
   just the on-image rect's delete button); the Single-view Baseline tab's `disabled` state when
@@ -60,12 +64,12 @@ upload → render → diff → approve) against the real Flask backend.
   browse flow against a **second, fully self-contained** Flask process spawned with
   `PPS_API_TOKEN` set (own temp data dir, own port, own viewer-proxy static server, torn down in
   a local `finally` block) — auth is deliberately never turned on on the shared backend the other
-  fifteen tests reuse, since that would break all of their existing unauthenticated calls;
+  sixteen tests reuse, since that would break all of their existing unauthenticated calls;
   confirms both that an unauthenticated request is genuinely rejected (`401`) and that the
   viewer's own Settings auth-token field unlocks the real, live flow end to end.
 
-  Tests 15-16 prove masks have a real *effect* on the pass/fail outcome, not just that their CRUD
-  UI works (tests 3, 7, and 9 draw/save/delete masks but never re-check a run's status
+  Tests 16-17 prove masks have a real *effect* on the pass/fail outcome, not just that their CRUD
+  UI works (tests 3, 8, and 10 draw/save/delete masks but never re-check a run's status
   afterward): a per-image mask drawn live through the real browser genuinely suppresses a real
   regression captured against the *same* (name, viewport) in a new run processed for the first
   time after the mask was saved, and a category mask created live on one snapshot name suppresses

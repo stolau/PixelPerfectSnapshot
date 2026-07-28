@@ -18,6 +18,7 @@ import {
   listCategories,
   listCategoryMasks,
   listGlobalMasks,
+  listOwnSnapshotMasks,
   listReleases,
   listRuns,
   listSnapshotMasks,
@@ -674,6 +675,7 @@ function resolveMaskIds(
   }[],
   globalMasks: Mask[],
   categoryMasks: Mask[],
+  ownMasks: Mask[],
 ): ({ scope: MaskScope; id: number } | null)[] {
   const rectKey = (r: { x: number; y: number; width: number; height: number }) =>
     `${r.x},${r.y},${r.width},${r.height}`;
@@ -685,6 +687,7 @@ function resolveMaskIds(
   for (const c of createdMasks) poolById.set(`${c.scope}:${c.id}`, c);
   for (const g of globalMasks) poolById.set(`global:${g.id}`, { scope: "global", ...g });
   for (const c of categoryMasks) poolById.set(`category:${c.id}`, { scope: "category", ...c });
+  for (const o of ownMasks) poolById.set(`per-image:${o.id}`, { scope: "per-image", ...o });
   const pool = [...poolById.values()];
 
   const bindings: ({ scope: MaskScope; id: number } | null)[] = rendered.map(() => null);
@@ -700,10 +703,12 @@ function resolveMaskIds(
 }
 
 /**
- * A rect with no resolved binding always turns out to be a pre-existing per-image mask by
- * elimination: globalMasks/categoryMasks are always fully enumerated with ids from their own
- * list endpoints, so anything left unmatched can't be either of those -- the only scope lacking
- * a full-listing-with-ids endpoint is per-image (see resolveMaskIds).
+ * A rect with no resolved binding falls back to "per-image". This is now purely defensive:
+ * globalMasks/categoryMasks/ownMasks are all fully enumerated with ids from their own list
+ * endpoints, so in steady state every rendered mask should resolve to a binding. A `null`
+ * binding can still occur transiently -- e.g. the combined-list fetch (which produces `rendered`)
+ * and the own-list fetch (which populates ownMasks) resolve asynchronously at different times --
+ * and per-image remains the most likely scope for an unmatched rect (see resolveMaskIds).
  */
 function maskChipScope(binding: { scope: MaskScope; id: number } | null): MaskScope {
   return binding?.scope ?? "per-image";
@@ -828,6 +833,7 @@ function InteractiveImagePane({
   createdMasks,
   globalMasks,
   categoryMasks,
+  ownMasks,
   category,
   drawStart,
   drawCurrent,
@@ -859,6 +865,7 @@ function InteractiveImagePane({
   }[];
   globalMasks: Mask[];
   categoryMasks: Mask[];
+  ownMasks: Mask[];
   category: string | null;
   drawStart: { x: number; y: number } | null;
   drawCurrent: { x: number; y: number } | null;
@@ -896,7 +903,7 @@ function InteractiveImagePane({
         (() => {
           const scaleX = overlayRef.current.clientWidth / imgNaturalSize.width;
           const scaleY = overlayRef.current.clientHeight / imgNaturalSize.height;
-          const bindings = resolveMaskIds(masks, createdMasks, globalMasks, categoryMasks);
+          const bindings = resolveMaskIds(masks, createdMasks, globalMasks, categoryMasks, ownMasks);
           return masks.map((rect, i) => {
             const binding = bindings[i];
             const color =
@@ -987,6 +994,7 @@ function SnapshotDetail({
   const [masksError, setMasksError] = useState<string | null>(null);
   const [globalMasks, setGlobalMasks] = useState<Mask[] | null>(null);
   const [categoryMasks, setCategoryMasks] = useState<Mask[] | null>(null);
+  const [ownMasks, setOwnMasks] = useState<Mask[] | null>(null);
   const [createdMasks, setCreatedMasks] = useState<
     { scope: MaskScope; id: number; x: number; y: number; width: number; height: number }[]
   >([]);
@@ -1016,10 +1024,15 @@ function SnapshotDetail({
   }, [runId, name]);
 
   useEffect(() => {
-    Promise.all([listSnapshotMasks(runId, name), listGlobalMasks()]).then(
-      ([snapshotMasks, global]) => {
+    Promise.all([
+      listSnapshotMasks(runId, name),
+      listGlobalMasks(),
+      listOwnSnapshotMasks(runId, name),
+    ]).then(
+      ([snapshotMasks, global, own]) => {
         setMasks(snapshotMasks);
         setGlobalMasks(global);
+        setOwnMasks(own);
       },
       (err: Error) => setMasksError(err.message),
     );
@@ -1055,6 +1068,9 @@ function SnapshotDetail({
       } else if (scope === "category" && category != null) {
         const list = await listCategoryMasks(category);
         setCategoryMasks(list);
+      } else if (scope === "per-image") {
+        const own = await listOwnSnapshotMasks(runId, name);
+        setOwnMasks(own);
       }
     } catch (err) {
       setMasksError((err as Error).message);
@@ -1191,7 +1207,9 @@ function SnapshotDetail({
   const statusPill = snapshot !== null ? statusStyles(snapshot.status) : null;
   const approveDisabled = snapshot !== null && snapshot.status === "pass";
   const maskBindings =
-    masks !== null ? resolveMaskIds(masks, createdMasks, globalMasks ?? [], categoryMasks ?? []) : [];
+    masks !== null
+      ? resolveMaskIds(masks, createdMasks, globalMasks ?? [], categoryMasks ?? [], ownMasks ?? [])
+      : [];
 
   return (
     <div className="flex flex-col gap-4">
@@ -1240,6 +1258,7 @@ function SnapshotDetail({
                     createdMasks={createdMasks}
                     globalMasks={globalMasks ?? []}
                     categoryMasks={categoryMasks ?? []}
+                    ownMasks={ownMasks ?? []}
                     category={snapshot.category}
                     drawStart={drawStart}
                     drawCurrent={drawCurrent}

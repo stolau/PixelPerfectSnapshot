@@ -223,7 +223,21 @@ masks, combined.
 }
 ```
 No `id` on entries — this is the resolved, combined view used by `compare()`, not a per-row
-listing. `404` unknown run or name.
+listing; for a per-row listing of just this snapshot's own masks, see
+`GET .../masks/own` below. `404` unknown run or name.
+
+### `GET /api/runs/<run_id>/snapshots/<name>/masks/own`
+List just this snapshot's own per-image masks (keyed by this snapshot's (name, viewport)) — a
+per-row listing with `id`s, unlike the combined `GET .../masks` above.
+`200`:
+```json
+{
+  "masks": [
+    {"id": 1, "x": 0, "y": 0, "width": 100, "height": 40}
+  ]
+}
+```
+`404` unknown run or name.
 
 ### `POST /api/runs/<run_id>/snapshots/<name>/masks`
 Create a per-image mask for this snapshot's (name, viewport) key — like a baseline, it then applies

@@ -199,6 +199,13 @@ export async function listSnapshotMasks(runId: string, name: string): Promise<Ma
   return body.masks;
 }
 
+export async function listOwnSnapshotMasks(runId: string, name: string): Promise<Mask[]> {
+  const body = await request<{ masks: Mask[] }>(
+    `/api/runs/${encodeURIComponent(runId)}/snapshots/${encodeURIComponent(name)}/masks/own`,
+  );
+  return body.masks;
+}
+
 export function createSnapshotMask(
   runId: string,
   name: string,

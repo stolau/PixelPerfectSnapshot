@@ -392,6 +392,56 @@ def test_snapshot_mask_create_and_list_includes_global(client):
     assert len(masks) == 2
 
 
+def test_list_own_snapshot_masks_excludes_global_and_category(client):
+    example = load_example()
+    run_id = create_run(client)
+    upload_snapshot(client, run_id, dict(example, category=CATEGORY))
+
+    client.post("/api/masks", json={"x": 0, "y": 0, "width": 5, "height": 5})
+    client.post(
+        f"/api/categories/{CATEGORY_URL}/masks", json={"x": 1, "y": 1, "width": 6, "height": 6}
+    )
+    per_image = client.post(
+        f"/api/runs/{run_id}/snapshots/{example['name']}/masks",
+        json={"x": 100, "y": 100, "width": 10, "height": 10},
+    )
+    assert per_image.status_code == 201
+    per_image_body = per_image.get_json()
+
+    # Another snapshot with the same name but a different viewport, carrying its own per-image
+    # mask -- this must not leak into run_id's own-mask listing either.
+    other_viewport = dict(example, viewport={"width": 640, "height": 480})
+    run_2 = create_run(client)
+    upload_snapshot(client, run_2, other_viewport)
+    client.post(
+        f"/api/runs/{run_2}/snapshots/{example['name']}/masks",
+        json={"x": 200, "y": 200, "width": 20, "height": 20},
+    )
+
+    # Sanity check: the combined per-snapshot listing does include all three.
+    combined = client.get(f"/api/runs/{run_id}/snapshots/{example['name']}/masks")
+    assert len(combined.get_json()["masks"]) == 3
+
+    response = client.get(f"/api/runs/{run_id}/snapshots/{example['name']}/masks/own")
+    assert response.status_code == 200
+    masks = response.get_json()["masks"]
+    assert masks == [per_image_body]
+
+
+def test_own_snapshot_masks_unknown_run_404(client):
+    example = load_example()
+    response = client.get(f"/api/runs/bogus/snapshots/{example['name']}/masks/own")
+    assert response.status_code == 404
+    assert "error" in response.get_json()
+
+
+def test_own_snapshot_masks_unknown_snapshot_404(client):
+    run_id = create_run(client)
+    response = client.get(f"/api/runs/{run_id}/snapshots/no-such-name/masks/own")
+    assert response.status_code == 404
+    assert "error" in response.get_json()
+
+
 def test_snapshot_mask_not_shared_across_different_viewport(client):
     example = load_example()
     other_viewport = dict(example, viewport={"width": 640, "height": 480})

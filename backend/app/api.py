@@ -559,6 +559,26 @@ def list_snapshot_masks(run_id: str, name: str) -> tuple[Response, int] | dict[s
     }
 
 
+@bp.get("/runs/<run_id>/snapshots/<name>/masks/own")
+def list_own_snapshot_masks(run_id: str, name: str) -> tuple[Response, int] | dict[str, object]:
+    if _get_run(run_id) is None:
+        return _error("run not found", 404)
+    snapshot = _get_snapshot(run_id, name)
+    if snapshot is None:
+        return _error("snapshot not found", 404)
+    rows = get_db().execute(
+        "SELECT id, x, y, width, height FROM masks"
+        " WHERE name = ? AND viewport_width = ? AND viewport_height = ? ORDER BY id",
+        (snapshot["name"], snapshot["viewport_width"], snapshot["viewport_height"]),
+    ).fetchall()
+    return {
+        "masks": [
+            {"id": row["id"], "x": row["x"], "y": row["y"], "width": row["width"], "height": row["height"]}
+            for row in rows
+        ]
+    }
+
+
 @bp.post("/runs/<run_id>/snapshots/<name>/masks")
 def create_snapshot_mask(run_id: str, name: str) -> tuple[Response, int] | tuple[dict[str, int], int]:
     if _get_run(run_id) is None:
