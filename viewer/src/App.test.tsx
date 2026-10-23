@@ -730,6 +730,54 @@ test("Approve checkmark is disabled once status is pass -- a passing snapshot ha
   );
 });
 
+// The docs/API.md example entry for structureDiff.
+const STRUCTURE_DIFF = [
+  {
+    path: "body>main:nth-of-type(1)>h1:nth-of-type(1)",
+    kind: "moved",
+    before: { x: 0, y: 40, width: 600, height: 32, text: "Checkout" },
+    after: { x: 0, y: 60, width: 600, height: 32, text: "Checkout" },
+  },
+];
+
+test.each([
+  { status: "fail", structureDiff: STRUCTURE_DIFF, shown: true },
+  { status: "fail", structureDiff: null, shown: false },
+  { status: "pass", structureDiff: STRUCTURE_DIFF, shown: false },
+  { status: "pass", structureDiff: null, shown: false },
+])(
+  "SnapshotDetail shows structure panel only for a failing snapshot with structureDiff ($status, $structureDiff)",
+  async ({ status, structureDiff, shown }) => {
+    routes[`GET ${SNAPSHOT_URL}`] = {
+      body: { ...snapshotDetailRenderedFixture, status, structureDiff },
+    };
+    await openSnapshotDetail();
+    await screen.findByText(`Status: ${status}`);
+    const panel = document.querySelector('[data-testid~="structure-diff"]');
+    if (!shown) {
+      expect(panel).toBeNull();
+      return;
+    }
+    expect(panel).not.toBeNull();
+    expect(panel!.textContent).toContain("Layout changes");
+    const cells = Array.from(panel!.querySelectorAll("tbody tr td")).map((td) => td.textContent);
+    expect(cells).toEqual([
+      "body>main:nth-of-type(1)>h1:nth-of-type(1)",
+      "moved",
+      "0, 40 · 600×32",
+      "0, 60 · 600×32",
+    ]);
+  },
+);
+
+test("structure panel on a fail with an empty structureDiff says no element changed", async () => {
+  routes[`GET ${SNAPSHOT_URL}`] = { body: { ...snapshotDetailRenderedFixture, structureDiff: [] } };
+  await openSnapshotDetail();
+  await screen.findByText("Status: fail");
+  const panel = document.querySelector('[data-testid~="structure-diff"]');
+  expect(panel?.textContent).toContain("No element moved, resized, appeared, disappeared");
+});
+
 test("Approve checkmark stays enabled for a fail status", async () => {
   routes[`GET ${SNAPSHOT_URL}`] = { body: snapshotDetailRenderedFixture }; // status: "fail"
   await openSnapshotDetail();

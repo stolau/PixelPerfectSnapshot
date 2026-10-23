@@ -14,6 +14,7 @@ from app.db import get_db
 from app.render import (
     applicable_masks,
     baseline_history_path_by_hash,
+    baseline_structure_path,
     category_viewport,
     image_path,
     process_pending,
@@ -21,6 +22,7 @@ from app.render import (
     scoped_baseline_history_path,
     scoped_baseline_read_path,
     scoped_baseline_write_path,
+    structure_path,
 )
 
 bp = Blueprint("api", __name__, url_prefix="/api")
@@ -227,6 +229,9 @@ def create_release() -> tuple[Response, int] | tuple[dict[str, object], int]:
     file_count = 0
     for source_file in sorted(source_dir.glob("*.png")):
         shutil.copyfile(source_file, dest_dir / source_file.name)
+        source_structure = baseline_structure_path(source_file)
+        if source_structure.exists():
+            shutil.copyfile(source_structure, baseline_structure_path(dest_dir / source_file.name))
         file_count += 1
     created_at = (
         datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
@@ -322,6 +327,14 @@ def get_snapshot(run_id: str, name: str) -> tuple[Response, int] | dict[str, obj
             return None
         return url_for("api.get_image", run_id=run_id, name=name, kind=kind)
 
+    structure_diff = None
+    if snapshot["status"] == "fail":
+        diff_file = structure_path(
+            current_app.config["DATA_DIR"], run_id, snapshot["id"], "structure-diff"
+        )
+        if diff_file.exists():
+            structure_diff = json.loads(diff_file.read_text())
+
     return {
         "name": snapshot["name"],
         "viewport": {
@@ -333,6 +346,7 @@ def get_snapshot(run_id: str, name: str) -> tuple[Response, int] | dict[str, obj
         "baselineUrl": image_url("baseline"),
         "candidateUrl": image_url("candidate"),
         "diffUrl": image_url("diff"),
+        "structureDiff": structure_diff,
     }
 
 
@@ -443,6 +457,13 @@ def approve_snapshot(run_id: str, name: str) -> tuple[Response, int] | tuple[dic
         history_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(baseline, history_path)
     shutil.copyfile(candidate, baseline)
+    # The structure travels with its PNG; a candidate rendered before structures were recorded
+    # has none, and the old baseline's structure would then describe the wrong picture.
+    candidate_structure = structure_path(data_dir, run["id"], snapshot["id"], "structure")
+    if candidate_structure.exists():
+        shutil.copyfile(candidate_structure, baseline_structure_path(baseline))
+    else:
+        baseline_structure_path(baseline).unlink(missing_ok=True)
     db = get_db()
     if run["scope_kind"] is None:
         # NOTE: POST /api/branches/<id>/merge promotes baselines to master by content hash
@@ -477,6 +498,10 @@ def merge_branch(branch_id: str) -> tuple[Response, int] | tuple[dict[str, objec
             shutil.copyfile(master_path, history_path)
         master_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(branch_file, master_path)
+        if baseline_structure_path(branch_file).exists():
+            shutil.copyfile(baseline_structure_path(branch_file), baseline_structure_path(master_path))
+        else:
+            baseline_structure_path(master_path).unlink(missing_ok=True)
         merged.append(key)
     return {"merged": merged, "count": len(merged)}, 200
 

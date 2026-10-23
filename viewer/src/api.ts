@@ -29,6 +29,21 @@ export interface RunDetail {
   snapshots: { name: string; viewport: Viewport; status: SnapshotStatus }[];
 }
 
+export interface StructureBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text: string;
+}
+
+export interface StructureChange {
+  path: string;
+  kind: "moved" | "resized" | "appeared" | "disappeared" | "text";
+  before: StructureBox | null;
+  after: StructureBox | null;
+}
+
 export interface SnapshotDetail {
   name: string;
   viewport: Viewport;
@@ -37,6 +52,9 @@ export interface SnapshotDetail {
   baselineUrl: string | null;
   candidateUrl: string | null;
   diffUrl: string | null;
+  /** Explains a failing pixel diff from the rendered layout; null unless status is fail and
+   * both structures were recorded. Never decides the status. */
+  structureDiff: StructureChange[] | null;
 }
 
 export class ApiError extends Error {
