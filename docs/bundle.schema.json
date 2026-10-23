@@ -112,7 +112,7 @@
           }
         },
         "category": {
-          "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/tag" }]
+          "anyOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }]
         },
         "spec": {
           "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/tag" }]

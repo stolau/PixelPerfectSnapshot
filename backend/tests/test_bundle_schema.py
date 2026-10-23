@@ -86,6 +86,13 @@ def empty_server() -> dict:
     return dict(server_manifest(), snapshots=[])
 
 
+def category_with_slash() -> dict:
+    # PATCH and category rename store any non-empty string, and the manifest takes the DB value.
+    manifest = server_manifest()
+    manifest["snapshots"][1]["category"] = "a/b"
+    return manifest
+
+
 def unknown_files_key() -> dict:
     manifest = client_manifest()
     manifest["snapshots"][0]["files"]["html"] = "snapshots/0001/page.html"
@@ -94,7 +101,15 @@ def unknown_files_key() -> dict:
 
 @pytest.mark.parametrize(
     "build",
-    [server_manifest, client_manifest, release_scoped, unscoped, empty_server, unknown_files_key],
+    [
+        server_manifest,
+        client_manifest,
+        release_scoped,
+        unscoped,
+        empty_server,
+        unknown_files_key,
+        category_with_slash,
+    ],
 )
 def test_valid_manifests(validator, build):
     errors = [error.message for error in validator.iter_errors(build())]
@@ -137,6 +152,30 @@ def _unknown_top_level(m):
     m["extra"] = True
 
 
+def _entry_missing_spec(m):
+    del m["snapshots"][0]["spec"]
+
+
+def _entry_unknown_key(m):
+    m["snapshots"][0]["extra"] = True
+
+
+def _run_unknown_key(m):
+    m["run"]["extra"] = True
+
+
+def _scope_kind_master(m):
+    m["run"]["scope"]["kind"] = "master"
+
+
+def _when_too_long(m):
+    m["snapshots"][0]["when"] = "x" * 501
+
+
+def _spec_slash(m):
+    m["snapshots"][0]["spec"] = "a/b"
+
+
 def _path(value):
     def mutate(m):
         m["snapshots"][0]["files"]["candidate"] = value
@@ -154,6 +193,12 @@ INVALID = {
     "status-pending": (server_manifest, _status_pending),
     "bundle-version-1": (server_manifest, _bundle_version_1),
     "unknown-top-level-key": (server_manifest, _unknown_top_level),
+    "entry-missing-spec": (server_manifest, _entry_missing_spec),
+    "entry-unknown-key": (server_manifest, _entry_unknown_key),
+    "run-unknown-key": (server_manifest, _run_unknown_key),
+    "scope-kind-master": (server_manifest, _scope_kind_master),
+    "when-too-long": (server_manifest, _when_too_long),
+    "spec-slash": (server_manifest, _spec_slash),
     "path-parent": (server_manifest, _path("../x")),
     "path-absolute": (server_manifest, _path("/abs")),
     "path-dot-segment": (server_manifest, _path("snapshots/./a")),

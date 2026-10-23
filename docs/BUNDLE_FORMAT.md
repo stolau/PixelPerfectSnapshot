@@ -28,7 +28,11 @@ snapshots/0002/...
 The directory and file names above are how producers lay the zip out, **not contract**: a consumer
 resolves every file only through the manifest's `files` paths, and must not derive a path from a
 snapshot's name, its ordinal or the ordinal's width. Directories are ordinals rather than names
-because a snapshot name may hold any character but `/`.
+because a snapshot name may hold any character but `/`. A producer's ordinal is the snapshot's 1-based
+position in upload order, never its database id.
+
+The zip may use zip64: the server writes it when the size calls for it (the client writer refuses
+rather than write it), so a consumer must accept zip64.
 
 ## `manifest.json`
 
@@ -60,9 +64,9 @@ omitted.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `name` | string | The snapshot's name. |
+| `name` | string | The snapshot's name, unique within the bundle. |
 | `viewport` | `{width, height}` | The snapshot's viewport. |
-| `category` | string \| `null` | The snapshot's mask category. |
+| `category` | string \| `null` | The snapshot's mask category: any non-empty string, since a category set by `PATCH` or a rename is not held to the upload's shape. |
 | `spec` | string \| `null` | The snapshot's spec id ([SNAPSHOT_FORMAT.md](SNAPSHOT_FORMAT.md)). |
 | `when` | string \| `null` | The state the snapshot shows; non-null only when `spec` is. |
 | `status` | string \| `null` | Server: exactly one of `pass`, `fail`, `approved-baseline-missing` (a bundle is never built while a snapshot is `pending`). Client: always `null`. |
