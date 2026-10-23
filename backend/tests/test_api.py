@@ -1262,6 +1262,48 @@ def test_merge_carries_structure(client, tmp_path):
     assert render.baseline_structure_path(master_png).read_bytes() == branch_structure
 
 
+def test_approve_without_structure_drops_stale_baseline_structure(client, tmp_path):
+    example = load_example()
+    width, height = example["viewport"]["width"], example["viewport"]["height"]
+    run_1 = create_run(client)
+    upload_snapshot(client, run_1, example)
+    write_candidate_bytes(tmp_path, run_1, example["name"], (100, 0, 0))
+    write_candidate_structure(tmp_path, run_1, example["name"], "first")
+    assert client.post(f"/api/runs/{run_1}/snapshots/{example['name']}/approve").status_code == 200
+    structure = render.baseline_structure_path(
+        render.baseline_path(tmp_path, example["name"], width, height)
+    )
+    assert structure.exists()
+
+    # A candidate rendered before structures were recorded has no structure.json.
+    run_2 = create_run(client)
+    upload_snapshot(client, run_2, example)
+    write_candidate_bytes(tmp_path, run_2, example["name"], (0, 100, 0))
+    assert client.post(f"/api/runs/{run_2}/snapshots/{example['name']}/approve").status_code == 200
+    assert not structure.exists()
+
+
+def test_merge_without_structure_drops_stale_master_structure(client, tmp_path):
+    example = load_example()
+    width, height = example["viewport"]["width"], example["viewport"]["height"]
+    master_run = create_run(client)
+    upload_snapshot(client, master_run, example)
+    write_candidate_bytes(tmp_path, master_run, example["name"], (100, 0, 0))
+    write_candidate_structure(tmp_path, master_run, example["name"], "master")
+    assert client.post(f"/api/runs/{master_run}/snapshots/{example['name']}/approve").status_code == 200
+    master_structure = render.baseline_structure_path(
+        render.baseline_path(tmp_path, example["name"], width, height)
+    )
+    assert master_structure.exists()
+
+    branch_run = create_scoped_run(client, "branch", "feature-x")
+    upload_snapshot(client, branch_run, example)
+    write_candidate_bytes(tmp_path, branch_run, example["name"], (0, 100, 0))
+    assert client.post(f"/api/runs/{branch_run}/snapshots/{example['name']}/approve").status_code == 200
+    assert client.post("/api/branches/feature-x/merge").status_code == 200
+    assert not master_structure.exists()
+
+
 def test_merge_empty_branch_returns_zero(client):
     response = client.post("/api/branches/no-such-branch/merge")
     assert response.status_code == 200
