@@ -62,9 +62,17 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ## 5. Keep code maps current
 
-Each package/example has a `CODEMAP.md`. Consult the relevant one before working in an area, and
-when your change alters its public surface, update that `CODEMAP.md` in the same change.
+The code map lives on ProbaImpera, not in the repository (see `PROBAIMPERA.md`). Read the rows for
+an area before working in it (`GET .../codemap.md?path=<prefix>`), and when your change alters a
+file's surface or pays for a trap, record it with `POST .../codemap` in the same change. The
+per-package `CODEMAP.md` files are deprecated: they keep only their commands, so don't add to them.
 
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+<!-- probaimpera:guardrail start -->
+
+@PROBAIMPERA.md
+
+<!-- probaimpera:guardrail end -->

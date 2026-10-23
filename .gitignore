@@ -7,3 +7,8 @@ __pycache__/
 .ruff_cache/
 coverage/
 *.local
+
+# ProbaImpera: the local plugin install (holds the agent key), its guardrail settings and lane worktrees
+.claude/plugins/probaimpera/
+.claude/settings.json
+.claude/worktrees/
