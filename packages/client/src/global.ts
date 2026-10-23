@@ -1,3 +1,4 @@
+import type { CaptureOptions } from "./capture.js";
 import type { Snapshot } from "./index.js";
 
 declare global {
@@ -8,7 +9,7 @@ declare global {
     __ppsCapture: (
       doc: Document,
       name: string,
-      options?: { blockSelectors?: string[]; category?: string },
+      options?: CaptureOptions,
     ) => Promise<Snapshot>;
   }
 }
