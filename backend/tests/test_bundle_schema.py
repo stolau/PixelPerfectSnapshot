@@ -176,6 +176,42 @@ def _spec_slash(m):
     m["snapshots"][0]["spec"] = "a/b"
 
 
+def _missing_snapshots_key(m):
+    del m["snapshots"]
+
+
+def _producer_other(m):
+    m["producer"] = "ci"
+
+
+def _run_missing_scope(m):
+    del m["run"]["scope"]
+
+
+def _run_id_empty(m):
+    m["run"]["id"] = ""
+
+
+def _name_slash(m):
+    m["snapshots"][0]["name"] = "a/b"
+
+
+def _viewport_missing_height(m):
+    del m["snapshots"][0]["viewport"]["height"]
+
+
+def _viewport_unknown_key(m):
+    m["snapshots"][0]["viewport"]["dpr"] = 2
+
+
+def _viewport_zero(m):
+    m["snapshots"][0]["viewport"]["width"] = 0
+
+
+def _category_empty(m):
+    m["snapshots"][0]["category"] = ""
+
+
 def _path(value):
     def mutate(m):
         m["snapshots"][0]["files"]["candidate"] = value
@@ -199,6 +235,15 @@ INVALID = {
     "scope-kind-master": (server_manifest, _scope_kind_master),
     "when-too-long": (server_manifest, _when_too_long),
     "spec-slash": (server_manifest, _spec_slash),
+    "missing-snapshots-key": (server_manifest, _missing_snapshots_key),
+    "producer-other": (server_manifest, _producer_other),
+    "run-missing-scope": (server_manifest, _run_missing_scope),
+    "run-id-empty": (server_manifest, _run_id_empty),
+    "name-slash": (server_manifest, _name_slash),
+    "viewport-missing-height": (server_manifest, _viewport_missing_height),
+    "viewport-unknown-key": (server_manifest, _viewport_unknown_key),
+    "viewport-zero": (server_manifest, _viewport_zero),
+    "category-empty": (server_manifest, _category_empty),
     "path-parent": (server_manifest, _path("../x")),
     "path-absolute": (server_manifest, _path("/abs")),
     "path-dot-segment": (server_manifest, _path("snapshots/./a")),
