@@ -130,12 +130,30 @@ already established for it by another snapshot · `404` unknown run · `409` dup
   "category": null,
   "baselineUrl": null,
   "candidateUrl": null,
-  "diffUrl": null
+  "diffUrl": null,
+  "structureDiff": null
 }
 ```
 The three URLs are **server-relative paths** (e.g.
 `/api/runs/run-2/snapshots/checkout-page/images/baseline`) pointing at the image endpoints below
 once the corresponding PNG exists; `null` until then. `404` unknown run or name.
+
+`structureDiff` explains a failing pixel diff from the rendered layout; it never affects
+`status`. It is `null` unless `status` is `fail` and both the candidate and its baseline have a
+recorded structure (baselines approved before structures were recorded get one from their next
+passing run). Otherwise it is an array with one entry per changed element:
+```json
+[
+  {"path": "body>main:nth-of-type(1)>h1:nth-of-type(1)", "kind": "moved",
+   "before": {"x": 0, "y": 40, "width": 600, "height": 32, "text": "Checkout"},
+   "after": {"x": 0, "y": 60, "width": 600, "height": 32, "text": "Checkout"}}
+]
+```
+`path` is the element's tag/nth-of-type path from `body`. `kind` is one of `moved` (x/y changed),
+`resized` (width/height changed), `appeared`, `disappeared` or `text` (its own text changed); an
+element that changed in several ways has one entry per kind. `before` is `null` for `appeared`
+and `after` is `null` for `disappeared`. Boxes are CSS pixels from `getBoundingClientRect()`;
+`text` is the element's own text content.
 
 ### `PATCH /api/runs/<run_id>/snapshots/<name>`
 Set or clear this snapshot's `category`. Body: `{"category": "<string>"|null}`.

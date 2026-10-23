@@ -1,6 +1,6 @@
-# Snapshot format v0.2
+# Snapshot format v0.3
 
-**Status: FROZEN.** Changes require a version bump (v0.3) landed as its own change — never edited
+**Status: FROZEN.** Changes require a version bump (v0.4) landed as its own change — never edited
 concurrently with work that consumes this contract. Machine-readable schema:
 [`snapshot.schema.json`](snapshot.schema.json). Example: [`examples/example-snapshot.json`](examples/example-snapshot.json).
 
@@ -50,6 +50,12 @@ Run identity is **not** part of the snapshot — it is transport-level, carried 
 (`POST /api/runs/<run_id>/snapshots`, see [API.md](API.md)).
 
 ## Changelog
+
+**v0.3** — `blob:` object URLs in `img src` count as same-origin references when their origin
+matches the page's, so they are fetched and inlined as `data:` URIs like any other same-origin
+image. A revoked or foreign object URL, or one whose fetch fails, is left as-is; CSS
+`url(blob:…)` and `blob:` stylesheet hrefs are still left as-is. Records the behaviour the `html`
+field already promised. `formatVersion` remains `0` on the wire.
 
 **v0.2** — added optional `category` field (mask-category tag; see Fields table above).
 Additive and backward-compatible: omitted entirely by producers that don't set it, and consumers
