@@ -12,7 +12,8 @@ pixel-diff them against human-approved baselines on a server, review and approve
 | `viewer/` | web UI for runs, diffs, and baseline approval | React + Vite + TypeScript |
 | `docs/` | the frozen contracts: [snapshot format](docs/SNAPSHOT_FORMAT.md) · [HTTP API](docs/API.md) · [self-hosting](docs/SELF_HOSTING.md) |
 
-Each package documents its public surface in a `CODEMAP.md`.
+The per-file code map lives on this project's ProbaImpera server (see `PROBAIMPERA.md`); each
+package's `CODEMAP.md` now keeps only its commands.
 
 ## Quickstart
 
@@ -73,7 +74,8 @@ the backend itself is not published to the host.
 Data persists in the `pps-data` named volume, mounted at `/data` inside the backend container
 (`PPS_DATA_DIR=/data`). It holds `pps.sqlite3` (run/snapshot metadata), `blobs/` (uploaded snapshot
 documents), `images/` (rendered candidate and diff PNGs), and `baselines/` (approved baseline
-PNGs) — see `backend/CODEMAP.md` for the full layout. This data survives `docker compose down`
+PNGs) — the full layout is in the code map rows for `backend/app/__init__.py` and
+`backend/app/render.py`. This data survives `docker compose down`
 (without `-v`); use `docker compose down -v` to also delete the volume.
 
 `PPS_ALLOWED_ORIGIN` (CORS) does not need to be set in this setup: since nginx reverse-proxies
