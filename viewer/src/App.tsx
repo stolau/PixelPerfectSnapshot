@@ -37,6 +37,8 @@ import type {
   RunDetail as RunDetailData,
   RunSummary,
   SnapshotDetail as SnapshotDetailData,
+  StructureBox,
+  StructureChange,
 } from "./api.js";
 import { AuthenticatedImage } from "./AuthenticatedImage.js";
 import { getAuthToken, setAuthToken } from "./authToken.js";
@@ -834,6 +836,67 @@ function ImagePane({
   );
 }
 
+const STRUCTURE_KIND_LABEL: Record<StructureChange["kind"], string> = {
+  moved: "moved",
+  resized: "resized",
+  appeared: "appeared",
+  disappeared: "disappeared",
+  text: "text changed",
+};
+
+function formatStructureBox(box: StructureBox | null, kind: StructureChange["kind"]): string {
+  if (box === null) return "—";
+  if (kind === "text") return `"${box.text}"`;
+  const n = (v: number) => Math.round(v * 10) / 10;
+  return `${n(box.x)}, ${n(box.y)} · ${n(box.width)}×${n(box.height)}`;
+}
+
+/** Rendered-layout explanation of a failing pixel diff. It only explains; the pixel diff alone
+ * decides the status. */
+function StructureDiffPanel({ changes }: { changes: StructureChange[] }) {
+  return (
+    <section data-testid="structure-diff" className="flex flex-col gap-2">
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        Layout changes
+      </h2>
+      {changes.length === 0 ? (
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          No element moved, resized, appeared, disappeared or changed its text; the pixel
+          difference comes from something layout does not record, such as a colour, an image or
+          font rendering.
+        </p>
+      ) : (
+        <div className={`${card} overflow-x-auto`}>
+          <table className="w-full text-left text-sm">
+            <thead className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              <tr>
+                <th className="px-3 py-2 font-semibold">Element</th>
+                <th className="px-3 py-2 font-semibold">Change</th>
+                <th className="px-3 py-2 font-semibold">Before</th>
+                <th className="px-3 py-2 font-semibold">After</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+              {changes.map((change) => (
+                <tr key={`${change.path} ${change.kind}`}>
+                  <td className="px-3 py-2 font-mono text-xs break-all">{change.path}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">{STRUCTURE_KIND_LABEL[change.kind]}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    {formatStructureBox(change.before, change.kind)}
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    {formatStructureBox(change.after, change.kind)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function MaskAssignmentMenu({
   existingCategories,
   onSelectGlobal,
@@ -1465,6 +1528,10 @@ function SnapshotDetail({
             );
           })()}
           {approveError !== null && <p className={alertError}>{approveError}</p>}
+
+          {snapshot.status === "fail" && snapshot.structureDiff !== null && (
+            <StructureDiffPanel changes={snapshot.structureDiff} />
+          )}
 
           <section className="flex flex-col gap-2">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">

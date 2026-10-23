@@ -122,6 +122,7 @@ def test_render_no_baseline(browser_env, app, client, tmp_path):
         "baselineUrl": None,
         "candidateUrl": f"/api/runs/{run_id}/snapshots/page/images/candidate",
         "diffUrl": None,
+        "structureDiff": None,
     }
 
     response = client.get(f"/api/runs/{run_id}/snapshots/page/images/candidate")
@@ -712,3 +713,209 @@ def test_process_pending_branch_scope_falls_back_to_master_when_no_branch_file(
     assert response.status_code == 200
     statuses = {s["name"]: s["status"] for s in response.get_json()["snapshots"]}
     assert statuses == {"page": "pass"}
+
+
+# --- rendered-layout structure (LLM-PPS-8) ----------------------------------
+
+
+def make_layout_snapshot(name: str, body: str, css: str) -> dict:
+    # As make_snapshot: the CSS lives only in the captured stylesheet, so layout seen in the
+    # structure comes from the real rehydrated render, not from the html string.
+    return {
+        "formatVersion": 0,
+        "name": name,
+        "viewport": {"width": 320, "height": 240},
+        "html": (
+            "<!DOCTYPE html><html><head>"
+            '<link rel="stylesheet" href="http://localhost/main.css">'
+            f"</head><body>{body}</body></html>"
+        ),
+        "stylesheets": [
+            {"href": "http://localhost/main.css", "content": "body{margin:0;background:#fff}" + css}
+        ],
+    }
+
+
+def create_scoped_run(client, kind: str, scope_id: str) -> str:
+    response = client.post("/api/runs", json={"scope": {"kind": kind, "id": scope_id}})
+    assert response.status_code == 201
+    return response.get_json()["id"]
+
+
+def approve(client, run_id: str, name: str = "page") -> None:
+    assert client.post(f"/api/runs/{run_id}/snapshots/{name}/approve").status_code == 200
+
+
+def baseline_png(tmp_path, scope_kind=None, scope_id=None, name="page") -> Path:
+    return render.scoped_baseline_write_path(tmp_path, scope_kind, scope_id, name, 320, 240)
+
+
+def run_once(app, client, doc: dict) -> tuple[str, str]:
+    run_id = create_run(client)
+    upload(client, run_id, doc)
+    [(_, _, status)] = process(app)
+    return run_id, status
+
+
+def structure_diff_of(client, run_id: str, name: str = "page"):
+    return client.get(f"/api/runs/{run_id}/snapshots/{name}").get_json()["structureDiff"]
+
+
+def test_structure_never_decides_status(browser_env, app, client, tmp_path):
+    # Plant 1: the layout changes (a transparent, empty block moves) but no pixel does.
+    invisible = ".ghost{display:block;width:10px;height:10px;margin-top:%s}"
+    run_1, _ = run_once(app, client, make_layout_snapshot(
+        "page", '<div class="ghost"></div>', invisible % "0px"))
+    approve(client, run_1)
+    run_2, status = run_once(app, client, make_layout_snapshot(
+        "page", '<div class="ghost"></div>', invisible % "30px"))
+    assert status == "pass"
+    assert structure_diff_of(client, run_2) is None
+
+    # Plant 2: the pixels change (a colour) and the layout does not.
+    run_3, _ = run_once(app, client, make_snapshot("other", "#2e7d32"))
+    approve(client, run_3, "other")
+    run_4, status = run_once(app, client, make_snapshot("other", "#b71c1c"))
+    assert status == "fail"
+    assert structure_diff_of(client, run_4, "other") == []
+
+
+def test_structure_diff_only_on_fail(browser_env, app, client, tmp_path):
+    run_1, _ = run_once(app, client, make_snapshot("page", "#2e7d32"))
+    approve(client, run_1)
+    run_2, status = run_once(app, client, make_snapshot("page", "#2e7d32"))
+    assert status == "pass"
+    assert list((tmp_path / "images" / run_2).glob("*/structure.json"))
+    assert not list((tmp_path / "images" / run_2).glob("*/structure-diff.json"))
+    assert structure_diff_of(client, run_2) is None
+
+
+@pytest.mark.parametrize("scope_kind", [None, "branch", "release"])
+def test_approve_writes_structure_beside_scoped_baseline(
+    browser_env, app, client, tmp_path, scope_kind
+):
+    scope_id = {None: None, "branch": "feature-s", "release": "v1"}[scope_kind]
+    if scope_kind is None:
+        run_id = create_run(client)
+    else:
+        if scope_kind == "release":
+            assert client.post("/api/releases", json={"id": scope_id}).status_code == 201
+        run_id = create_scoped_run(client, scope_kind, scope_id)
+    upload(client, run_id, make_snapshot("page", "#2e7d32"))
+    process(app)
+    approve(client, run_id)
+
+    png = baseline_png(tmp_path, scope_kind, scope_id)
+    structure = render.baseline_structure_path(png)
+    assert png.exists() and structure.exists()
+    candidate_structure = next((tmp_path / "images" / run_id).glob("*/structure.json"))
+    assert structure.read_bytes() == candidate_structure.read_bytes()
+    if scope_kind is not None:
+        assert not render.baseline_structure_path(baseline_png(tmp_path)).exists()
+
+
+def test_legacy_baseline_without_structure(browser_env, app, client, tmp_path):
+    run_1, _ = run_once(app, client, make_snapshot("page", "#2e7d32"))
+    approve(client, run_1)
+    render.baseline_structure_path(baseline_png(tmp_path)).unlink()  # approved before LLM-PPS-8
+
+    run_2, status = run_once(app, client, make_snapshot("page", "#b71c1c"))
+    assert status == "fail"
+    assert structure_diff_of(client, run_2) is None
+    assert not list((tmp_path / "images" / run_2).glob("*/structure-diff.json"))
+
+
+def test_structure_diff_reports_css_only_move(browser_env, app, client, tmp_path):
+    body = '<div id="box">Hi</div>'
+    css = "#box{width:100px;height:40px;background:#123456;color:#fff;margin-top:%s}"
+    first = make_layout_snapshot("page", body, css % "0px")
+    second = make_layout_snapshot("page", body, css % "20px")
+    assert first["html"] == second["html"]  # only the stylesheet differs
+
+    run_1, _ = run_once(app, client, first)
+    approve(client, run_1)
+    run_2, status = run_once(app, client, second)
+    assert status == "fail"
+    assert structure_diff_of(client, run_2) == [
+        {
+            "path": "body>div:nth-of-type(1)",
+            "kind": "moved",
+            "before": {"x": 0, "y": 0, "width": 100, "height": 40, "text": "Hi"},
+            "after": {"x": 0, "y": 20, "width": 100, "height": 40, "text": "Hi"},
+        }
+    ]
+
+
+_KIND_CSS = (
+    "div,span{position:absolute;top:0;width:50px;height:20px;background:#123456;color:#fff}"
+    ".a{left:0}.b{left:100px}.c{left:200px}"
+)
+_KIND_BASE = '<div class="a">A</div><div class="b">B</div>'
+
+
+@pytest.mark.parametrize(
+    "kind, body, css, path",
+    [
+        ("moved", _KIND_BASE, _KIND_CSS + ".b{top:30px}", "body>div:nth-of-type(2)"),
+        ("resized", _KIND_BASE, _KIND_CSS + ".b{width:80px}", "body>div:nth-of-type(2)"),
+        ("text", '<div class="a">A</div><div class="b">Z</div>', _KIND_CSS, "body>div:nth-of-type(2)"),
+        # Inserted before .b: keyed by tag/nth-of-type, .b keeps its path and is not reported.
+        (
+            "appeared",
+            '<div class="a">A</div><span class="c">C</span><div class="b">B</div>',
+            _KIND_CSS,
+            "body>span:nth-of-type(1)",
+        ),
+        ("disappeared", '<div class="a">A</div>', _KIND_CSS, "body>div:nth-of-type(2)"),
+    ],
+)
+def test_structure_diff_kinds(browser_env, app, client, tmp_path, kind, body, css, path):
+    run_1, _ = run_once(app, client, make_layout_snapshot("page", _KIND_BASE, _KIND_CSS))
+    approve(client, run_1)
+    run_2, status = run_once(app, client, make_layout_snapshot("page", body, css))
+    assert status == "fail"
+    diff = structure_diff_of(client, run_2)
+    assert [(entry["path"], entry["kind"]) for entry in diff] == [(path, kind)]
+    entry = diff[0]
+    assert (entry["before"] is None) == (kind == "appeared")
+    assert (entry["after"] is None) == (kind == "disappeared")
+
+
+def test_pass_fills_missing_structure(browser_env, app, client, tmp_path):
+    run_1, _ = run_once(app, client, make_snapshot("page", "#2e7d32"))
+    approve(client, run_1)
+    png = baseline_png(tmp_path)
+    structure = render.baseline_structure_path(png)
+    structure.unlink()
+    png_bytes = png.read_bytes()
+
+    run_2, status = run_once(app, client, make_snapshot("page", "#2e7d32"))
+    assert status == "pass"
+    assert structure.exists()
+    candidate_structure = next((tmp_path / "images" / run_2).glob("*/structure.json"))
+    assert structure.read_bytes() == candidate_structure.read_bytes()
+    assert png.read_bytes() == png_bytes
+
+
+def test_pass_does_not_overwrite_existing_structure(browser_env, app, client, tmp_path):
+    run_1, _ = run_once(app, client, make_snapshot("page", "#2e7d32"))
+    approve(client, run_1)
+    structure = render.baseline_structure_path(baseline_png(tmp_path))
+    structure.write_text("[]")  # recorded earlier; must survive a pass untouched
+
+    _, status = run_once(app, client, make_snapshot("page", "#2e7d32"))
+    assert status == "pass"
+    assert structure.read_text() == "[]"
+
+
+def test_branch_fallback_fill_writes_beside_master_png(browser_env, app, client, tmp_path):
+    run_1, _ = run_once(app, client, make_snapshot("page", "#2e7d32"))
+    approve(client, run_1)
+    master_structure = render.baseline_structure_path(baseline_png(tmp_path))
+    master_structure.unlink()
+
+    branch_run = create_scoped_run(client, "branch", "feature-f")
+    upload(client, branch_run, make_snapshot("page", "#2e7d32"))
+    assert process(app) == [(branch_run, "page", "pass")]
+    assert master_structure.exists()
+    assert not (tmp_path / "baselines" / "branches" / "feature-f").exists()
