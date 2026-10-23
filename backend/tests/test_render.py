@@ -887,6 +887,11 @@ def test_pass_fills_missing_structure(browser_env, app, client, tmp_path):
     png = baseline_png(tmp_path)
     structure = render.baseline_structure_path(png)
     structure.unlink()
+    # One stray pixel, well inside MAX_DIFF_RATIO: the run still passes, and a fill-in that
+    # also copied the candidate PNG would change these bytes.
+    img = Image.open(png).convert("RGB")
+    img.putpixel((300, 200), (0, 0, 0))
+    img.save(png)
     png_bytes = png.read_bytes()
 
     run_2, status = run_once(app, client, make_snapshot("page", "#2e7d32"))
