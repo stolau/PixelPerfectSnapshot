@@ -1733,6 +1733,8 @@ def test_export_zip_409_while_pending(client, tmp_path):
 
 
 def test_export_zip_manifest_and_bytes(client, tmp_path):
+    # A snapshot in another run first, so DB ids no longer equal positions in this run.
+    upload_snapshot(client, create_run(client), load_example())
     response = client.post("/api/runs", json={})
     created = response.get_json()
     run_id = created["id"]
@@ -1761,6 +1763,8 @@ def test_export_zip_manifest_and_bytes(client, tmp_path):
     assert manifest["run"] == {"id": run_id, "createdAt": created["createdAt"], "scope": None}
     assert [s["name"] for s in manifest["snapshots"]] == ["zeta", "alpha"]
     zeta_entry, alpha_entry = manifest["snapshots"]
+    assert zeta_entry["files"]["snapshot"] == "snapshots/0001/snapshot.json"
+    assert alpha_entry["files"]["snapshot"] == "snapshots/0002/snapshot.json"
     assert zeta_entry["status"] == "fail"
     assert zeta_entry["viewport"] == {"width": width, "height": height}
     assert alpha_entry["status"] == "approved-baseline-missing"
