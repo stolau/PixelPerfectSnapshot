@@ -134,6 +134,49 @@ def test_schema_invalid_400(client):
     assert "error" in response.get_json()
 
 
+def test_upload_snapshot_with_spec_and_when(client, tmp_path):
+    doc = dict(load_example(), spec="pps-checkout", when="cart has two items")
+    run_id = create_run(client)
+    response = client.post(f"/api/runs/{run_id}/snapshots", json=doc)
+    assert response.status_code == 201
+
+    blobs = list((tmp_path / "blobs" / run_id).glob("*.json"))
+    assert len(blobs) == 1
+    assert json.loads(blobs[0].read_text()) == doc
+
+
+def test_upload_spec_alone_ok(client):
+    run_id = create_run(client)
+    response = client.post(f"/api/runs/{run_id}/snapshots", json=dict(load_example(), spec="pps-checkout"))
+    assert response.status_code == 201
+
+
+def test_upload_when_without_spec_400(client):
+    run_id = create_run(client)
+    response = client.post(f"/api/runs/{run_id}/snapshots", json=dict(load_example(), when="cart has two items"))
+    assert response.status_code == 400
+    assert "error" in response.get_json()
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"spec": ""},
+        {"spec": "a/b"},
+        {"spec": "x" * 201},
+        {"spec": 7},
+        {"spec": "pps-checkout", "when": ""},
+        {"spec": "pps-checkout", "when": "x" * 501},
+    ],
+    ids=["spec-empty", "spec-slash", "spec-too-long", "spec-not-string", "when-empty", "when-too-long"],
+)
+def test_upload_spec_when_shape_400(client, extra):
+    run_id = create_run(client)
+    response = client.post(f"/api/runs/{run_id}/snapshots", json=dict(load_example(), **extra))
+    assert response.status_code == 400
+    assert "error" in response.get_json()
+
+
 def test_unknown_run_404(client):
     for method, url in [
         ("post", "/api/runs/bogus/snapshots"),

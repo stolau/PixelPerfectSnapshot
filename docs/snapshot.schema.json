@@ -1,10 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/stolau/PixelPerfectSnapshot/main/docs/snapshot.schema.json",
-  "title": "PixelPerfectSnapshot snapshot (format v0.1, formatVersion 0)",
+  "title": "PixelPerfectSnapshot snapshot (format v0.4, formatVersion 0)",
   "type": "object",
   "required": ["formatVersion", "name", "viewport", "html", "stylesheets"],
   "additionalProperties": false,
+  "dependentRequired": {
+    "when": ["spec"]
+  },
   "properties": {
     "formatVersion": {
       "const": 0
@@ -20,6 +23,17 @@
       "minLength": 1,
       "maxLength": 200,
       "pattern": "^[^/]+$"
+    },
+    "spec": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[^/]+$"
+    },
+    "when": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
     },
     "viewport": {
       "type": "object",
