@@ -1,6 +1,15 @@
 import type { Snapshot } from "./index.js";
 import { rewriteCssUrls } from "./css-urls.js";
 
+/**
+ * captureSnapshot's options. `when` is allowed only with `spec`, so the type
+ * is a union; captureSnapshot also checks it at run time.
+ */
+export type CaptureOptions = { blockSelectors?: string[]; category?: string } & (
+  | { spec?: undefined; when?: undefined }
+  | { spec: string; when?: string }
+);
+
 /** Fetches a URL and returns its body as a data: URI (MIME from the blob), or null on failure. */
 async function toDataUri(url: string): Promise<string | null> {
   try {
@@ -46,12 +55,19 @@ function isStylesheetRel(rel: string | null): boolean {
  * `options.category` tags the snapshot with a mask category (see
  * docs/API.md's mask-categories section) — masks saved against that category
  * apply to every snapshot sharing it, regardless of `name`.
+ *
+ * `options.spec` tags the snapshot with the spec id of the screen it shows,
+ * and `options.when` with the state it shows (docs/SNAPSHOT_FORMAT.md);
+ * `when` is allowed only with `spec`.
  */
 export async function captureSnapshot(
   document: Document,
   name: string,
-  options?: { blockSelectors?: string[]; category?: string },
+  options?: CaptureOptions,
 ): Promise<Snapshot> {
+  if (options?.when !== undefined && options.spec === undefined) {
+    throw new Error("captureSnapshot: options.when requires options.spec");
+  }
   const win = document.defaultView;
   if (!win) throw new Error("captureSnapshot: document is not attached to a window");
   const origin = win.location.origin;
@@ -153,6 +169,8 @@ export async function captureSnapshot(
     formatVersion: 0,
     name,
     ...(options?.category !== undefined ? { category: options.category } : {}),
+    ...(options?.spec !== undefined ? { spec: options.spec } : {}),
+    ...(options?.when !== undefined ? { when: options.when } : {}),
     viewport: { width: win.innerWidth, height: win.innerHeight },
     html: doctypeString(document.doctype) + clone.outerHTML,
     stylesheets,

@@ -62,12 +62,47 @@ const snapshot = await captureSnapshot(document, "checkout-page", {
 All snapshots sharing a category must have the same viewport — the backend rejects an upload whose
 `category` conflicts with the viewport already established for it.
 
+## Spec tags
+
+Pass `options.spec` to tag a snapshot with the spec id of the screen it shows, and `options.when`
+with the state it shows, so a consumer can tie the snapshot to a spec and one of its states (see
+[docs/SNAPSHOT_FORMAT.md](https://github.com/stolau/PixelPerfectSnapshot/blob/main/docs/SNAPSHOT_FORMAT.md)). Both are optional and have no effect
+on rendering, diffing or baselines; `when` is allowed only with `spec` (a type error, and
+`captureSnapshot` rejects it at run time):
+
+```ts
+const snapshot = await captureSnapshot(document, "checkout-page", {
+  spec: "pps-checkout",
+  when: "cart has two items",
+});
+```
+
+## Run bundles
+
+`writeBundle(snapshots, filePath)` writes the client form of a run bundle, a `.zip` of a
+`manifest.json` and each snapshot document, in the format of
+[docs/BUNDLE_FORMAT.md](https://github.com/stolau/PixelPerfectSnapshot/blob/main/docs/BUNDLE_FORMAT.md). It is Node-only, so it lives in its own
+subpath and the main entry stays free of Node built-ins:
+
+```ts
+import { writeBundle } from "pixelperfectsnapshot/bundle";
+
+await writeBundle([snapshot], "run.zip");
+```
+
+The client bundle holds snapshot documents only: `run` and every `status` are `null`. It rejects,
+before writing anything, duplicate snapshot names, a snapshot with `when` but no `spec`, and a
+bundle beyond zip32 (more than 65535 entries or 4 GiB). The server produces the same format with
+images and statuses for an uploaded run; see `GET /api/runs/<run_id>/export.zip` in
+[docs/API.md](https://github.com/stolau/PixelPerfectSnapshot/blob/main/docs/API.md).
+
 ## Browser bundles
 
 The package also ships two dependency-free IIFE bundles for injecting into pages
 (e.g. via Playwright's `addScriptTag`):
 
-- `dist/capture.js` — installs `window.__ppsCapture(document, name): Promise<Snapshot>`
+- `dist/capture.js` — installs `window.__ppsCapture(document, name, options?): Promise<Snapshot>`,
+  taking the same options as `captureSnapshot`
 - `dist/rehydrate.js` — installs `window.__ppsRehydrate(snapshot): Promise<void>`
 
 ## Note on monorepo / git installs
