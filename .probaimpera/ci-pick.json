@@ -1,0 +1,23 @@
+{
+ "base": "f97b99bd2aa71707a304566a95b065330fec5c27",
+ "diff": "f54f1db20eac8b717a5a406c2e407dceb16da7af132eace2e3f7751ca88636ef",
+ "floor": [],
+ "mode": "all",
+ "paths": [
+  "backend/app/api.py",
+  "backend/app/render.py",
+  "backend/tests/test_api.py",
+  "backend/tests/test_render.py",
+  "examples/demo-app/e2e.test.ts",
+  "packages/client/src/blob-image.test.ts",
+  "packages/client/src/capture.ts",
+  "viewer/src/App.test.tsx",
+  "viewer/src/App.tsx",
+  "viewer/src/api.ts",
+  "viewer/src/fixtures/snapshot-detail-rendered.json",
+  "viewer/src/fixtures/snapshot-detail.json"
+ ],
+ "reason": "viewer/src/fixtures/snapshot-detail-rendered.json: a test fixture; viewer/src/fixtures/snapshot-detail-rendered.json: not in the index at f97b99bd2aa7, so it cannot be placed; viewer/src/fixtures/snapshot-detail.json: a test fixture; viewer/src/fixtures/snapshot-detail.json: not in the index at f97b99bd2aa7, so it cannot be placed",
+ "rules": "908.1",
+ "tests": []
+}
