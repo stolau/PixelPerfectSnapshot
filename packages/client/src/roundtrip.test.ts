@@ -15,6 +15,7 @@ const fixturesDir = path.join(pkgDir, "fixtures");
 const captureBundle = path.join(pkgDir, "dist", "capture.js");
 const rehydrateBundle = path.join(pkgDir, "dist", "rehydrate.js");
 const schemaPath = fileURLToPath(new URL("../../../docs/snapshot.schema.json", import.meta.url));
+const bundleSchemaPath = fileURLToPath(new URL("../../../docs/bundle.schema.json", import.meta.url));
 
 const WIDTH = 800;
 const HEIGHT = 600;
@@ -33,6 +34,32 @@ function closeServer(s: Server): Promise<void> {
   s.closeAllConnections();
   return new Promise((resolve, reject) => s.close((err) => (err ? reject(err) : resolve())));
 }
+
+test("bundle schema compiles under Ajv2020 strict and accepts a client manifest", () => {
+  // Ajv2020 is strict by default: an unknown keyword throws at compile, where Python's
+  // jsonschema would ignore it. Both schemas must pass both validators.
+  const ajv = new Ajv2020();
+  ajv.compile(JSON.parse(readFileSync(schemaPath, "utf8")));
+  const validate = ajv.compile(JSON.parse(readFileSync(bundleSchemaPath, "utf8")));
+  const entry = (n: number) => ({
+    name: `page-${n}`,
+    viewport: { width: 1280, height: 720 },
+    category: null,
+    spec: null,
+    when: null,
+    status: null,
+    files: { snapshot: `snapshots/000${n}/snapshot.json` },
+  });
+  const manifest = {
+    bundleVersion: 0,
+    producer: "client",
+    run: null,
+    snapshots: [{ ...entry(1), spec: "pps-checkout", when: "cart has two items" }, entry(2)],
+  };
+  const valid = validate(manifest);
+  expect(validate.errors ?? []).toEqual([]);
+  expect(valid).toBe(true);
+});
 
 afterAll(async () => {
   await browser?.close();
@@ -101,6 +128,11 @@ test(
     // A null stylesheet href must be rejected by the v0.1 schema.
     const nullHref: unknown = { ...snapshot, stylesheets: [{ href: null, content: "" }] };
     expect(ajv.validate(schema, nullHref)).toBe(false);
+
+    // v0.4: optional spec/when validate; when without spec does not.
+    const tagged = { ...snapshot, spec: "pps-checkout", when: "cart has two items" };
+    expect(ajv.validate(schema, tagged)).toBe(true);
+    expect(ajv.validate(schema, { ...snapshot, when: "cart has two items" })).toBe(false);
 
     expect(snapshot.formatVersion).toBe(0);
     expect(snapshot.name).toBe("fixture-page");

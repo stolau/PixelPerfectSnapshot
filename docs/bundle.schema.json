@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/stolau/PixelPerfectSnapshot/main/docs/bundle.schema.json",
+  "title": "PixelPerfectSnapshot run bundle manifest (bundle format v0.1, bundleVersion 0)",
+  "type": "object",
+  "required": ["bundleVersion", "producer", "run", "snapshots"],
+  "additionalProperties": false,
+  "properties": {
+    "bundleVersion": {
+      "const": 0
+    },
+    "producer": {
+      "enum": ["server", "client"]
+    },
+    "run": {
+      "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/run" }]
+    },
+    "snapshots": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/snapshot" }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "type": "object",
+        "required": ["producer"],
+        "properties": { "producer": { "const": "client" } }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "run": { "type": "null" },
+          "snapshots": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": { "status": { "type": "null" } }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "required": ["producer"],
+        "properties": { "producer": { "const": "server" } }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "run": { "type": "object" },
+          "snapshots": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": { "status": { "type": "string" } }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "tag": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[^/]+$"
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^(?!.*(^|/)\\.\\.?(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$"
+    },
+    "run": {
+      "type": "object",
+      "required": ["id", "createdAt", "scope"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "createdAt": { "type": "string" },
+        "scope": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["kind", "id"],
+              "additionalProperties": false,
+              "properties": {
+                "kind": { "enum": ["branch", "release"] },
+                "id": { "type": "string", "minLength": 1 }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "snapshot": {
+      "type": "object",
+      "required": ["name", "viewport", "category", "spec", "when", "status", "files"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/tag" },
+        "viewport": {
+          "type": "object",
+          "required": ["width", "height"],
+          "additionalProperties": false,
+          "properties": {
+            "width": { "type": "integer", "minimum": 1 },
+            "height": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "category": {
+          "anyOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }]
+        },
+        "spec": {
+          "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/tag" }]
+        },
+        "when": {
+          "anyOf": [
+            { "type": "null" },
+            { "type": "string", "minLength": 1, "maxLength": 500 }
+          ]
+        },
+        "status": {
+          "enum": ["pass", "fail", "approved-baseline-missing", null]
+        },
+        "files": {
+          "type": "object",
+          "required": ["snapshot"],
+          "properties": {
+            "snapshot": { "$ref": "#/$defs/path" }
+          },
+          "additionalProperties": { "$ref": "#/$defs/path" }
+        }
+      },
+      "if": {
+        "type": "object",
+        "required": ["when"],
+        "properties": { "when": { "type": "string" } }
+      },
+      "then": {
+        "type": "object",
+        "properties": { "spec": { "type": "string" } }
+      }
+    }
+  }
+}

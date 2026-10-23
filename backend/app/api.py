@@ -3,7 +3,9 @@ import json
 import re
 import shutil
 import sqlite3
+import tempfile
 import uuid
+import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -348,6 +350,66 @@ def get_snapshot(run_id: str, name: str) -> tuple[Response, int] | dict[str, obj
         "diffUrl": image_url("diff"),
         "structureDiff": structure_diff,
     }
+
+
+@bp.get("/runs/<run_id>/export.zip")
+def export_run_zip(run_id: str) -> Response | tuple[Response, int]:
+    run = _get_run(run_id)
+    if run is None:
+        return _error("run not found", 404)
+    rows = get_db().execute(
+        "SELECT id, name, viewport_width, viewport_height, status, category"
+        " FROM snapshots WHERE run_id = ? ORDER BY id",
+        (run_id,),
+    ).fetchall()
+    pending = sum(1 for row in rows if row["status"] == "pending")
+    if pending:
+        return jsonify({"error": "run has pending snapshots", "pending": pending}), 409
+
+    data_dir = current_app.config["DATA_DIR"]
+    # Not a context manager: send_file streams it and the response closes it.
+    out = tempfile.SpooledTemporaryFile(max_size=16 * 1024 * 1024)  # noqa: SIM115
+    entries = []
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as bundle:
+        for ordinal, row in enumerate(rows, start=1):
+            folder = f"snapshots/{ordinal:04d}/"
+            blob_file = data_dir / "blobs" / run_id / f"{row['id']}.json"
+            blob = json.loads(blob_file.read_bytes())
+            bundle.write(blob_file, folder + "snapshot.json")
+            files = {"snapshot": folder + "snapshot.json"}
+            for kind in ("candidate", "baseline", "diff"):
+                path = _image_file(run, row, kind)
+                if path.exists():
+                    bundle.write(path, f"{folder}{kind}.png")
+                    files[kind] = f"{folder}{kind}.png"
+            if row["status"] == "fail":
+                diff_file = structure_path(data_dir, run_id, row["id"], "structure-diff")
+                if diff_file.exists():
+                    bundle.write(diff_file, folder + "structure-diff.json")
+                    files["structureDiff"] = folder + "structure-diff.json"
+            entries.append({
+                "name": row["name"],
+                "viewport": {"width": row["viewport_width"], "height": row["viewport_height"]},
+                "category": row["category"],
+                "spec": blob.get("spec"),
+                "when": blob.get("when"),
+                "status": row["status"],
+                "files": files,
+            })
+        scope = None
+        if run["scope_kind"] is not None:
+            scope = {"kind": run["scope_kind"], "id": run["scope_id"]}
+        manifest = {
+            "bundleVersion": 0,
+            "producer": "server",
+            "run": {"id": run["id"], "createdAt": run["created_at"], "scope": scope},
+            "snapshots": entries,
+        }
+        bundle.writestr("manifest.json", json.dumps(manifest, indent=2))
+    out.seek(0)
+    response = send_file(out, mimetype="application/zip", download_name=f"{run_id}.zip")
+    response.headers["Content-Disposition"] = f'attachment; filename="{run_id}.zip"'
+    return response
 
 
 @bp.patch("/runs/<run_id>/snapshots/<name>")

@@ -8,6 +8,8 @@ export interface Snapshot {
   formatVersion: 0;
   name: string;
   category?: string;
+  spec?: string;
+  when?: string;
   viewport: { width: number; height: number };
   html: string;
   stylesheets: { href: string; content: string }[];

@@ -74,7 +74,9 @@ to scope this run — see **Baseline scoping** above. `id` must be non-empty and
 ### `POST /api/runs/<run_id>/snapshots`
 Upload one snapshot. Body: a snapshot document, validated against
 [`snapshot.schema.json`](snapshot.schema.json) — includes an optional `category` field (see
-**Category** above).
+**Category** above), and optional `spec` and `when` fields (`when` only with `spec`; see
+[SNAPSHOT_FORMAT.md](SNAPSHOT_FORMAT.md)), which are stored with the document and carried into the
+run's export.
 `201` → `{"name": "<name>", "status": "pending"}`
 `400` → `{"error": "<schema violation message>"}`, or the `category` conflicts with the viewport
 already established for it by another snapshot · `404` unknown run · `409` duplicate name in run ·
@@ -204,6 +206,27 @@ the request at 300s (≈300 pending snapshots at ~1s each) — very large runs m
 get a 504 from nginx even though the backend keeps processing. To process pending snapshots outside
 the request/response cycle, run `flask --app app process-pending` on the backend — note this
 processes pending snapshots across **all** runs, not just one.
+
+### `GET /api/runs/<run_id>/export.zip`
+Download the run as a bundle: a `.zip` laid out per [BUNDLE_FORMAT.md](BUNDLE_FORMAT.md), with
+producer `server`, holding every snapshot of the run (passing and failing alike). It is built on
+demand from the run's current data; nothing is stored.
+`200` → `application/zip`, `Content-Disposition: attachment; filename="<run_id>.zip"`. A run with
+zero snapshots is `200` with `"snapshots": []` in its manifest.
+`404` unknown run → `{"error": "<message>"}`.
+`409` while any snapshot of the run is `pending` → `{"error": "<message>", "pending": <int>}`, the
+number of pending snapshots.
+
+Nothing renders a run by itself: someone must call `POST /api/runs/<run_id>/process` (or run
+`flask --app app process-pending`). A render that throws leaves its row `pending`, so the export
+stays `409` until processing succeeds. A consumer polls the per-snapshot `status` values of
+`GET /api/runs/<run_id>` until none is `pending`, not the aggregate `status` of `GET /api/runs`,
+which stays `pending` for a run with `approved-baseline-missing` snapshots. Same authentication as
+every other route (`401` without the token when `PPS_API_TOKEN` is set).
+
+In the zip, `structure-diff.json` follows `structureDiff`'s rule above: it is present only for a
+snapshot whose `status` is `fail` and whose structure diff exists. `baseline.png` is the scoped
+baseline the run reads, as of the export.
 
 ## Masks
 
@@ -361,4 +384,6 @@ Cut a new release. Body: `{"id": "<string>"}` (same `id` rules as a run's `scope
 
 ## Errors
 
-All error responses: `{"error": "<human-readable message>"}` with the status codes above.
+Every error response is a JSON object with an `"error"` string,
+`{"error": "<human-readable message>"}`, with the status codes above. An endpoint may document
+extra fields beside `error` (the export's `409` carries `pending`).

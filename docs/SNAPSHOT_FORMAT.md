@@ -1,6 +1,6 @@
-# Snapshot format v0.3
+# Snapshot format v0.4
 
-**Status: FROZEN.** Changes require a version bump (v0.4) landed as its own change — never edited
+**Status: FROZEN.** Changes require a version bump (v0.5) landed as its own change — never edited
 concurrently with work that consumes this contract. Machine-readable schema:
 [`snapshot.schema.json`](snapshot.schema.json). Example: [`examples/example-snapshot.json`](examples/example-snapshot.json).
 
@@ -14,6 +14,8 @@ re-renderable in a headless browser with no network access to the captured origi
 | `formatVersion` | `0` (const) | Format version of this document. |
 | `name` | string | Snapshot name chosen by the test author, e.g. `"checkout-page"`. Identifies the snapshot within a run. Must not contain `/` (names appear as URL path segments, see [API.md](API.md)). Baselines are keyed by **(name, viewport)**. |
 | `category` | string (optional) | Mask-category tag (same shape constraints as `name`). Snapshots sharing a `category` can share masks defined once for that category (see [API.md](API.md)'s Masks/Category sections). Purely a masking concept — has no effect on baseline identity. |
+| `spec` | string (optional) | The id of the spec this snapshot documents, so a consumer can tie it to a screen's spec (same shape constraints as `category`: 1-200 characters, no `/`). No effect on baseline identity, rendering or masking. |
+| `when` | string (optional) | Free text, 1-500 characters: the state the snapshot shows, e.g. `"cart has two items"`. Allowed only together with `spec`. No effect on baseline identity, rendering or masking. |
 | `viewport` | `{width, height}` | CSS-pixel viewport size at capture time. Re-rendering uses exactly this viewport. |
 | `html` | string | The serialized DOM: doctype plus `documentElement.outerHTML` at capture time. All same-origin asset references (`img src`, CSS `url(...)` in inline styles, `@font-face` font files) are replaced with `data:` URIs before serialization. Same-origin `<link rel="stylesheet">` hrefs are rewritten to their resolved absolute URLs so rehydration can match them deterministically. |
 | `stylesheets` | array of `{href, content}` | Same-origin stylesheets in document order. `href` is a string: the resolved absolute URL of the `<link rel="stylesheet">` the sheet came from. Only link-backed same-origin sheets appear here — inline `<style>` stays in `html`. A same-origin sheet whose fetch fails at capture is silently omitted; its `<link>` remains in `html` and will not load under the render engine's network abort. `content` is the CSS text with same-origin `url(...)` references inlined as `data:` URIs. |
@@ -50,6 +52,12 @@ Run identity is **not** part of the snapshot — it is transport-level, carried 
 (`POST /api/runs/<run_id>/snapshots`, see [API.md](API.md)).
 
 ## Changelog
+
+**v0.4** — added optional `spec` (spec id, same shape as `category`) and `when` (free-text state,
+1-500 characters, allowed only with `spec`) fields; see the Fields table above. Additive and
+backward-compatible like `category` in v0.2: omitted entirely by producers that don't set them,
+and they have no effect on baseline identity, rendering or masking. They are carried into the run
+bundle's manifest ([BUNDLE_FORMAT.md](BUNDLE_FORMAT.md)). `formatVersion` remains `0` on the wire.
 
 **v0.3** — `blob:` object URLs in `img src` count as same-origin references when their origin
 matches the page's, so they are fetched and inlined as `data:` URIs like any other same-origin

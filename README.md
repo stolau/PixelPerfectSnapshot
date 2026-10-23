@@ -50,6 +50,15 @@ For the full HTTP contract see [docs/API.md](docs/API.md), for the client's publ
 [packages/client/README.md](packages/client/README.md), and for a complete working example see
 [examples/demo-app](examples/demo-app).
 
+## Run bundles
+
+A run's snapshots can be exported as one `.zip` in a documented, generic
+[bundle format](docs/BUNDLE_FORMAT.md), for a consumer (a spec tool, an archive) to fetch and read.
+Two producers write it: the server, on demand for an uploaded run
+(`GET /api/runs/<run_id>/export.zip`, see [docs/API.md](docs/API.md)), and the client library,
+offline from snapshots it captured (`writeBundle`, see
+[packages/client/README.md](packages/client/README.md)).
+
 ## Development
 
 ```sh
