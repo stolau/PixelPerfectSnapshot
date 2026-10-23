@@ -29,6 +29,7 @@ const MIME: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".png": "image/png",
+  ".svg": "image/svg+xml",
 };
 
 let flaskProc: ChildProcess | undefined;
@@ -400,6 +401,23 @@ test(
     await runButtons.first().waitFor();
     expect(await runButtons.count()).toBe(4);
     await dogfoodCapture(page, "dogfood-run-list");
+
+    // The viewer's logo is a same-origin SVG: served with its real type it renders in the page
+    // and is inlined into a capture as image/svg+xml (octet-stream showed a broken image).
+    const logo = await fetch(`${viewerUrl}/mark.svg`);
+    expect(logo.status).toBe(200);
+    expect(logo.headers.get("content-type")).toMatch(/^image\/svg\+xml/);
+    await page.waitForFunction(
+      () => document.querySelector<HTMLImageElement>('img[src="/mark.svg"]')?.complete === true,
+    );
+    expect(
+      await page.evaluate(
+        () => document.querySelector<HTMLImageElement>('img[src="/mark.svg"]')?.naturalWidth ?? 0,
+      ),
+    ).toBeGreaterThan(0);
+    await page.addScriptTag({ path: captureBundle });
+    const viewerCapture = await page.evaluate(() => window.__ppsCapture(document, "viewer-logo"));
+    expect(viewerCapture.html).toContain('src="data:image/svg+xml');
 
     // Run 4 detail: approval needed at the new viewport.
     await runButtons.first().click();

@@ -36,8 +36,9 @@ function isStylesheetRel(rel: string | null): boolean {
  *
  * Same-origin asset references (img src, url(...) in inline styles and
  * <style> elements, url(...) in linked stylesheets) are inlined as data:
- * URIs. Cross-origin and data:/blob: references, and references whose fetch
- * fails, are left as-is.
+ * URIs. A blob: img src counts as same-origin when its origin matches the
+ * page's. Cross-origin and data: references, blob: references in CSS and
+ * stylesheet hrefs, and references whose fetch fails, are left as-is.
  *
  * `options.blockSelectors` blanks out matching elements (content cleared,
  * size preserved, `src` stripped) before assets are inlined.
@@ -80,7 +81,7 @@ export async function captureSnapshot(
   // Inline same-origin img src as data: URIs.
   for (const img of clone.querySelectorAll("img[src]")) {
     const src = img.getAttribute("src")!;
-    if (src.startsWith("data:") || src.startsWith("blob:")) continue;
+    if (src.startsWith("data:")) continue;
     let abs: URL;
     try {
       abs = new URL(src, baseUrl);

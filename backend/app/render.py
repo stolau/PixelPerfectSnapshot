@@ -13,11 +13,40 @@ REHYDRATE_JS = Path(__file__).resolve().parents[2] / "packages" / "client" / "di
 
 _SETTLE_CSS = "*{animation:none!important;transition:none!important;caret-color:transparent!important}"
 _DOUBLE_RAF = "() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))"
+# Rendered layout of every visible element under <body>, keyed by its tag/nth-of-type path:
+# the box comes from getBoundingClientRect() (CSS px) and the text is the element's own
+# direct text nodes, so a CSS-only change that moves or resizes an element is seen.
+_COLLECT_STRUCTURE = """() => {
+  const out = [];
+  const walk = (parent, path) => {
+    const seen = {};
+    for (const el of parent.children) {
+      const tag = el.tagName.toLowerCase();
+      seen[tag] = (seen[tag] || 0) + 1;
+      const elPath = `${path}>${tag}:nth-of-type(${seen[tag]})`;
+      const r = el.getBoundingClientRect();
+      if ((r.width > 0 || r.height > 0) && getComputedStyle(el).visibility !== "hidden") {
+        let text = "";
+        for (const node of el.childNodes) if (node.nodeType === Node.TEXT_NODE) text += node.nodeValue;
+        out.push({path: elPath, x: r.x, y: r.y, width: r.width, height: r.height, text: text.trim()});
+      }
+      walk(el, elPath);
+    }
+  };
+  walk(document.body, "body");
+  return out;
+}"""
 
 
 def baseline_path(data_dir: Path, name: str, width: int, height: int) -> Path:
     key = hashlib.sha256(f"{name}\n{width}x{height}".encode()).hexdigest()
     return data_dir / "baselines" / f"{key}.png"
+
+
+def baseline_structure_path(png: Path) -> Path:
+    """The rendered-layout structure recorded beside a baseline PNG. Only ever derive it from a
+    PNG path a scoped_baseline_* helper (or baseline_path) returned, so it lives where its PNG does."""
+    return png.with_suffix(".structure.json")
 
 
 def baseline_history_dir(data_dir: Path, name: str, width: int, height: int) -> Path:
@@ -83,6 +112,33 @@ def scoped_baseline_history_path(
 
 def image_path(data_dir: Path, run_id: str, snapshot_id: int, kind: str) -> Path:
     return data_dir / "images" / run_id / str(snapshot_id) / f"{kind}.png"
+
+
+def structure_path(data_dir: Path, run_id: str, snapshot_id: int, kind: str) -> Path:
+    return data_dir / "images" / run_id / str(snapshot_id) / f"{kind}.json"
+
+
+def _box(entry: dict) -> dict:
+    return {k: entry[k] for k in ("x", "y", "width", "height", "text")}
+
+
+def structure_diff(before: list[dict], after: list[dict]) -> list[dict]:
+    """Per-element layout changes between two collected structures, one entry per kind."""
+    old = {entry["path"]: entry for entry in before}
+    new = {entry["path"]: entry for entry in after}
+    changes: list[dict] = []
+    for path, was in old.items():
+        now = new.get(path)
+        if now is None:
+            changes.append({"path": path, "kind": "disappeared", "before": _box(was), "after": None})
+            continue
+        for kind, keys in (("moved", ("x", "y")), ("resized", ("width", "height")), ("text", ("text",))):
+            if any(was[k] != now[k] for k in keys):
+                changes.append({"path": path, "kind": kind, "before": _box(was), "after": _box(now)})
+    for path, now in new.items():
+        if path not in old:
+            changes.append({"path": path, "kind": "appeared", "before": None, "after": _box(now)})
+    return changes
 
 
 def compare(
@@ -182,7 +238,11 @@ def process_pending(run_id: str | None = None) -> list[tuple[str, str, str]]:
             page.evaluate("s => window.__ppsRehydrate(s)", doc)
             page.evaluate(_DOUBLE_RAF)
             page.screenshot(path=str(candidate))
+            structure = page.evaluate(_COLLECT_STRUCTURE)
             context.close()
+            structure_path(data_dir, row["run_id"], row["id"], "structure").write_text(
+                json.dumps(structure)
+            )
             baseline = scoped_baseline_read_path(
                 data_dir, row["scope_kind"], row["scope_id"],
                 row["name"], row["viewport_width"], row["viewport_height"],
@@ -202,6 +262,16 @@ def process_pending(run_id: str | None = None) -> list[tuple[str, str, str]]:
                     masks,
                 )
                 status = "pass" if within_tolerance else "fail"
+                # The structure only explains the pixel verdict above; it never feeds it.
+                baseline_structure = baseline_structure_path(baseline)
+                if status == "fail" and baseline_structure.exists():
+                    structure_path(data_dir, row["run_id"], row["id"], "structure-diff").write_text(
+                        json.dumps(structure_diff(json.loads(baseline_structure.read_text()), structure))
+                    )
+                elif status == "pass" and not baseline_structure.exists():
+                    # A baseline approved before structures were recorded gets one from its next
+                    # pass, beside the PNG that was actually read (master, for a branch fallback).
+                    baseline_structure.write_text(json.dumps(structure))
             db.execute("UPDATE snapshots SET status = ? WHERE id = ?", (status, row["id"]))
             db.commit()
             results.append((row["run_id"], row["name"], status))

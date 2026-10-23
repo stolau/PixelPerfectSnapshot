@@ -110,6 +110,7 @@ def test_snapshot_detail(client):
         "baselineUrl": None,
         "candidateUrl": None,
         "diffUrl": None,
+        "structureDiff": None,
     }
 
 
@@ -1222,6 +1223,87 @@ def test_merge_branch_promotes_files_to_master(client, tmp_path):
     assert not master_other_history.exists() or not list(master_other_history.glob("*.png"))
 
 
+def write_candidate_structure(tmp_path, run_id: str, name: str, text: str) -> bytes:
+    """Place a structure file where process_pending() records one for this snapshot."""
+    conn = sqlite3.connect(tmp_path / "pps.sqlite3")
+    try:
+        snapshot_id = conn.execute(
+            "SELECT id FROM snapshots WHERE run_id = ? AND name = ?", (run_id, name)
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    path = render.structure_path(tmp_path, run_id, snapshot_id, "structure")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(
+        [{"path": "body>p:nth-of-type(1)", "x": 0, "y": 0, "width": 4, "height": 4, "text": text}]
+    ))
+    return path.read_bytes()
+
+
+def test_merge_carries_structure(client, tmp_path):
+    example = load_example()
+    width, height = example["viewport"]["width"], example["viewport"]["height"]
+
+    master_run = create_run(client)
+    upload_snapshot(client, master_run, example)
+    write_candidate_bytes(tmp_path, master_run, example["name"], (100, 0, 0))
+    write_candidate_structure(tmp_path, master_run, example["name"], "master")
+    assert client.post(f"/api/runs/{master_run}/snapshots/{example['name']}/approve").status_code == 200
+
+    branch_run = create_scoped_run(client, "branch", "feature-x")
+    upload_snapshot(client, branch_run, example)
+    branch_png = write_candidate_bytes(tmp_path, branch_run, example["name"], (0, 100, 0))
+    branch_structure = write_candidate_structure(tmp_path, branch_run, example["name"], "branch")
+    assert client.post(f"/api/runs/{branch_run}/snapshots/{example['name']}/approve").status_code == 200
+
+    assert client.post("/api/branches/feature-x/merge").status_code == 200
+    master_png = render.baseline_path(tmp_path, example["name"], width, height)
+    assert master_png.read_bytes() == branch_png
+    assert render.baseline_structure_path(master_png).read_bytes() == branch_structure
+
+
+def test_approve_without_structure_drops_stale_baseline_structure(client, tmp_path):
+    example = load_example()
+    width, height = example["viewport"]["width"], example["viewport"]["height"]
+    run_1 = create_run(client)
+    upload_snapshot(client, run_1, example)
+    write_candidate_bytes(tmp_path, run_1, example["name"], (100, 0, 0))
+    write_candidate_structure(tmp_path, run_1, example["name"], "first")
+    assert client.post(f"/api/runs/{run_1}/snapshots/{example['name']}/approve").status_code == 200
+    structure = render.baseline_structure_path(
+        render.baseline_path(tmp_path, example["name"], width, height)
+    )
+    assert structure.exists()
+
+    # A candidate rendered before structures were recorded has no structure.json.
+    run_2 = create_run(client)
+    upload_snapshot(client, run_2, example)
+    write_candidate_bytes(tmp_path, run_2, example["name"], (0, 100, 0))
+    assert client.post(f"/api/runs/{run_2}/snapshots/{example['name']}/approve").status_code == 200
+    assert not structure.exists()
+
+
+def test_merge_without_structure_drops_stale_master_structure(client, tmp_path):
+    example = load_example()
+    width, height = example["viewport"]["width"], example["viewport"]["height"]
+    master_run = create_run(client)
+    upload_snapshot(client, master_run, example)
+    write_candidate_bytes(tmp_path, master_run, example["name"], (100, 0, 0))
+    write_candidate_structure(tmp_path, master_run, example["name"], "master")
+    assert client.post(f"/api/runs/{master_run}/snapshots/{example['name']}/approve").status_code == 200
+    master_structure = render.baseline_structure_path(
+        render.baseline_path(tmp_path, example["name"], width, height)
+    )
+    assert master_structure.exists()
+
+    branch_run = create_scoped_run(client, "branch", "feature-x")
+    upload_snapshot(client, branch_run, example)
+    write_candidate_bytes(tmp_path, branch_run, example["name"], (0, 100, 0))
+    assert client.post(f"/api/runs/{branch_run}/snapshots/{example['name']}/approve").status_code == 200
+    assert client.post("/api/branches/feature-x/merge").status_code == 200
+    assert not master_structure.exists()
+
+
 def test_merge_empty_branch_returns_zero(client):
     response = client.post("/api/branches/no-such-branch/merge")
     assert response.status_code == 200
@@ -1287,6 +1369,31 @@ def test_create_release_seeds_from_prior_release_not_current_master(client, tmp_
     v2_file = tmp_path / "baselines" / "releases" / "v2" / master_baseline.name
     assert v2_file.exists()
     assert v2_file.read_bytes() == content_a  # from v1, explicitly NOT current master
+
+
+def test_release_seed_carries_structure(client, tmp_path):
+    example = load_example()
+    run_id = create_run(client)
+    upload_snapshot(client, run_id, example)
+    candidate_png = write_candidate_bytes(tmp_path, run_id, example["name"], (10, 20, 30))
+    candidate_structure = write_candidate_structure(tmp_path, run_id, example["name"], "v1")
+    assert client.post(f"/api/runs/{run_id}/snapshots/{example['name']}/approve").status_code == 200
+
+    response = client.post("/api/releases", json={"id": "v1"})
+    assert response.status_code == 201
+    assert response.get_json()["fileCount"] == 1  # PNGs are counted, structures ride along
+    width, height = example["viewport"]["width"], example["viewport"]["height"]
+    release_png = render.scoped_baseline_write_path(
+        tmp_path, "release", "v1", example["name"], width, height
+    )
+    assert release_png.read_bytes() == candidate_png
+    assert render.baseline_structure_path(release_png).read_bytes() == candidate_structure
+
+    assert client.post("/api/releases", json={"id": "v2"}).status_code == 201
+    v2_png = render.scoped_baseline_write_path(
+        tmp_path, "release", "v2", example["name"], width, height
+    )
+    assert render.baseline_structure_path(v2_png).read_bytes() == candidate_structure
 
 
 def test_create_release_duplicate_id_409(client):
