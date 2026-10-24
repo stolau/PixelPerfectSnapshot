@@ -54,3 +54,12 @@ def test_auth_options_exempt(tmp_path, monkeypatch):
     )
     assert response.status_code != 401
     assert response.headers["Access-Control-Allow-Origin"] == "https://a.example.com"
+
+
+def test_export_zip_requires_token(tmp_path, monkeypatch):
+    monkeypatch.setenv("PPS_API_TOKEN", "s3cr3t")
+    client = create_app(data_dir=tmp_path).test_client()
+
+    response = client.get("/api/runs/abc123/export.zip")
+    assert response.status_code == 401
+    assert "error" in response.get_json()

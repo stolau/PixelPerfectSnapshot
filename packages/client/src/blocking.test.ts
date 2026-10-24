@@ -111,3 +111,47 @@ test(
   },
   60_000,
 );
+
+test(
+  "captureSnapshot options.spec/when are threaded into the snapshot, and omitted when absent",
+  async () => {
+    if (!existsSync(captureBundle)) {
+      throw new Error(`missing built artifact ${captureBundle} — run \`npm run build\` first`);
+    }
+
+    browser = await chromium.launch();
+    const page = await browser.newPage();
+    await page.setContent(HTML, { waitUntil: "domcontentloaded" });
+    await page.addScriptTag({ path: captureBundle });
+
+    const withBoth: Snapshot = await page.evaluate(
+      ({ name, opts }) => window.__ppsCapture(document, name, opts),
+      { name: "spec-when-test", opts: { spec: "pps-checkout", when: "cart has two items" } },
+    );
+    expect(withBoth.spec).toBe("pps-checkout");
+    expect(withBoth.when).toBe("cart has two items");
+
+    const specOnly: Snapshot = await page.evaluate(
+      ({ name, opts }) => window.__ppsCapture(document, name, opts),
+      { name: "spec-only-test", opts: { spec: "pps-checkout" } },
+    );
+    expect(specOnly.spec).toBe("pps-checkout");
+    expect(Object.prototype.hasOwnProperty.call(specOnly, "when")).toBe(false);
+
+    const neither: Snapshot = await page.evaluate(
+      ({ name }) => window.__ppsCapture(document, name),
+      { name: "no-spec-test" },
+    );
+    expect(Object.prototype.hasOwnProperty.call(neither, "spec")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(neither, "when")).toBe(false);
+
+    await expect(
+      page.evaluate(
+        // @ts-expect-error when without spec is refused by the options type
+        ({ name }) => window.__ppsCapture(document, name, { when: "y" }),
+        { name: "when-only-test" },
+      ),
+    ).rejects.toThrow(/when requires options.spec/);
+  },
+  60_000,
+);

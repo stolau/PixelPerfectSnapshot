@@ -1,9 +1,12 @@
+import io
 import json
 import re
 import sqlite3
+import zipfile
 from pathlib import Path
 from urllib.parse import quote
 
+import jsonschema
 import pytest
 from PIL import Image
 
@@ -1656,3 +1659,196 @@ def test_list_releases_newest_first(client):
             {"id": "v1", "createdAt": r1["createdAt"]},
         ]
     }
+
+
+# --- run bundle export -----------------------------------------------------
+
+
+BUNDLE_VALIDATOR = jsonschema.Draft202012Validator(
+    json.loads((DOCS / "bundle.schema.json").read_text())
+)
+
+
+def snapshot_id_of(tmp_path, run_id: str, name: str) -> int:
+    conn = sqlite3.connect(tmp_path / "pps.sqlite3")
+    try:
+        return conn.execute(
+            "SELECT id FROM snapshots WHERE run_id = ? AND name = ?", (run_id, name)
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+
+def write_png(path: Path, color: tuple[int, int, int]) -> bytes:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (4, 4), color).save(path)
+    return path.read_bytes()
+
+
+def write_structure_diff(tmp_path, run_id: str, name: str) -> bytes:
+    path = render.structure_path(
+        tmp_path, run_id, snapshot_id_of(tmp_path, run_id, name), "structure-diff"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps([{
+        "path": "body>p:nth-of-type(1)", "kind": "text",
+        "before": {"x": 0, "y": 0, "width": 4, "height": 4, "text": "a"},
+        "after": {"x": 0, "y": 0, "width": 4, "height": 4, "text": "b"},
+    }]))
+    return path.read_bytes()
+
+
+def export_bundle(client, run_id: str) -> tuple[dict, zipfile.ZipFile]:
+    response = client.get(f"/api/runs/{run_id}/export.zip")
+    assert response.status_code == 200
+    assert response.mimetype == "application/zip"
+    bundle = zipfile.ZipFile(io.BytesIO(response.data))
+    manifest = json.loads(bundle.read("manifest.json"))
+    errors = [e.message for e in BUNDLE_VALIDATOR.iter_errors(manifest)]
+    assert errors == []
+    for entry in manifest["snapshots"]:
+        for path in entry["files"].values():
+            assert path in bundle.namelist()
+    return manifest, bundle
+
+
+def test_export_zip_unknown_run_404(client):
+    response = client.get("/api/runs/does-not-exist/export.zip")
+    assert response.status_code == 404
+    assert "error" in response.get_json()
+
+
+def test_export_zip_409_while_pending(client, tmp_path):
+    run_id = create_run(client)
+    example = load_example()
+    upload_snapshot(client, run_id, dict(example, name="done"))
+    upload_snapshot(client, run_id, dict(example, name="waiting"))
+    set_snapshot_status(tmp_path, run_id, "done", "fail")
+
+    response = client.get(f"/api/runs/{run_id}/export.zip")
+    assert response.status_code == 409
+    body = response.get_json()
+    assert isinstance(body["error"], str)
+    assert body["pending"] == 1
+
+
+def test_export_zip_manifest_and_bytes(client, tmp_path):
+    # A snapshot in another run first, so DB ids no longer equal positions in this run.
+    upload_snapshot(client, create_run(client), load_example())
+    response = client.post("/api/runs", json={})
+    created = response.get_json()
+    run_id = created["id"]
+    example = load_example()
+    width, height = example["viewport"]["width"], example["viewport"]["height"]
+    zeta = dict(example, name="zeta")
+    alpha = dict(example, name="alpha")
+    upload_snapshot(client, run_id, zeta)
+    upload_snapshot(client, run_id, alpha)
+
+    zeta_id = snapshot_id_of(tmp_path, run_id, "zeta")
+    zeta_candidate = write_candidate_bytes(tmp_path, run_id, "zeta", (1, 2, 3))
+    zeta_baseline = write_png(render.baseline_path(tmp_path, "zeta", width, height), (4, 5, 6))
+    zeta_diff = write_png(render.image_path(tmp_path, run_id, zeta_id, "diff"), (7, 8, 9))
+    zeta_structure_diff = write_structure_diff(tmp_path, run_id, "zeta")
+    set_snapshot_status(tmp_path, run_id, "zeta", "fail")
+    alpha_candidate = write_candidate_bytes(tmp_path, run_id, "alpha", (10, 11, 12))
+    set_snapshot_status(tmp_path, run_id, "alpha", "approved-baseline-missing")
+
+    response = client.get(f"/api/runs/{run_id}/export.zip")
+    assert response.headers["Content-Disposition"] == f'attachment; filename="{run_id}.zip"'
+    manifest, bundle = export_bundle(client, run_id)
+
+    assert manifest["bundleVersion"] == 0
+    assert manifest["producer"] == "server"
+    assert manifest["run"] == {"id": run_id, "createdAt": created["createdAt"], "scope": None}
+    assert [s["name"] for s in manifest["snapshots"]] == ["zeta", "alpha"]
+    zeta_entry, alpha_entry = manifest["snapshots"]
+    assert zeta_entry["files"]["snapshot"] == "snapshots/0001/snapshot.json"
+    assert alpha_entry["files"]["snapshot"] == "snapshots/0002/snapshot.json"
+    assert zeta_entry["status"] == "fail"
+    assert zeta_entry["viewport"] == {"width": width, "height": height}
+    assert alpha_entry["status"] == "approved-baseline-missing"
+    assert set(zeta_entry["files"]) == {"snapshot", "candidate", "baseline", "diff", "structureDiff"}
+    assert set(alpha_entry["files"]) == {"snapshot", "candidate"}
+
+    for entry, doc, snapshot_name in ((zeta_entry, zeta, "zeta"), (alpha_entry, alpha, "alpha")):
+        blob_file = tmp_path / "blobs" / run_id / f"{snapshot_id_of(tmp_path, run_id, snapshot_name)}.json"
+        snapshot_bytes = bundle.read(entry["files"]["snapshot"])
+        assert snapshot_bytes == blob_file.read_bytes()
+        assert json.loads(snapshot_bytes) == doc
+    assert bundle.read(zeta_entry["files"]["candidate"]) == zeta_candidate
+    assert bundle.read(zeta_entry["files"]["baseline"]) == zeta_baseline
+    assert bundle.read(zeta_entry["files"]["diff"]) == zeta_diff
+    assert bundle.read(zeta_entry["files"]["structureDiff"]) == zeta_structure_diff
+    assert bundle.read(alpha_entry["files"]["candidate"]) == alpha_candidate
+
+
+def test_export_zip_structure_diff_only_while_fail(client, tmp_path):
+    run_id = create_run(client)
+    example = load_example()
+    upload_snapshot(client, run_id, example)
+    snapshot_id = snapshot_id_of(tmp_path, run_id, example["name"])
+    write_candidate_bytes(tmp_path, run_id, example["name"], (1, 2, 3))
+    write_png(render.image_path(tmp_path, run_id, snapshot_id, "diff"), (7, 8, 9))
+    write_structure_diff(tmp_path, run_id, example["name"])
+    set_snapshot_status(tmp_path, run_id, example["name"], "fail")
+
+    response = client.post(f"/api/runs/{run_id}/snapshots/{example['name']}/approve")
+    assert response.status_code == 200
+
+    manifest, _ = export_bundle(client, run_id)
+    (entry,) = manifest["snapshots"]
+    assert entry["status"] == "pass"
+    assert "structureDiff" not in entry["files"]
+    assert "diff" in entry["files"]
+
+
+def test_export_zip_category_from_db_spec_when_from_blob(client, tmp_path):
+    run_id = create_run(client)
+    example = load_example()
+    tagged = dict(example, name="tagged", category="c1", spec="pps-run-list", when="empty")
+    plain = dict(example, name="plain")
+    upload_snapshot(client, run_id, tagged)
+    upload_snapshot(client, run_id, plain)
+    response = client.patch(f"/api/runs/{run_id}/snapshots/tagged", json={"category": "c2"})
+    assert response.status_code == 200
+    set_snapshot_status(tmp_path, run_id, "tagged", "approved-baseline-missing")
+    set_snapshot_status(tmp_path, run_id, "plain", "approved-baseline-missing")
+
+    manifest, bundle = export_bundle(client, run_id)
+    tagged_entry, plain_entry = manifest["snapshots"]
+    assert tagged_entry["category"] == "c2"
+    assert tagged_entry["spec"] == "pps-run-list"
+    assert tagged_entry["when"] == "empty"
+    assert json.loads(bundle.read(tagged_entry["files"]["snapshot"]))["category"] == "c1"
+    assert plain_entry["category"] is None
+    assert plain_entry["spec"] is None
+    assert plain_entry["when"] is None
+
+
+def test_export_zip_baseline_is_scoped(client, tmp_path):
+    example = load_example()
+    width, height = example["viewport"]["width"], example["viewport"]["height"]
+    run_id = create_scoped_run(client, "branch", "feature-x")
+    upload_snapshot(client, run_id, dict(example, name="own"))
+    upload_snapshot(client, run_id, dict(example, name="fallback"))
+    branch_bytes = write_png(
+        render.scoped_baseline_write_path(tmp_path, "branch", "feature-x", "own", width, height),
+        (1, 1, 1),
+    )
+    write_png(render.baseline_path(tmp_path, "own", width, height), (2, 2, 2))
+    master_bytes = write_png(render.baseline_path(tmp_path, "fallback", width, height), (3, 3, 3))
+    set_snapshot_status(tmp_path, run_id, "own", "pass")
+    set_snapshot_status(tmp_path, run_id, "fallback", "pass")
+
+    manifest, bundle = export_bundle(client, run_id)
+    assert manifest["run"]["scope"] == {"kind": "branch", "id": "feature-x"}
+    own_entry, fallback_entry = manifest["snapshots"]
+    assert bundle.read(own_entry["files"]["baseline"]) == branch_bytes
+    assert bundle.read(fallback_entry["files"]["baseline"]) == master_bytes
+
+
+def test_export_zip_empty_run(client):
+    run_id = create_run(client)
+    manifest, _ = export_bundle(client, run_id)
+    assert manifest["snapshots"] == []
