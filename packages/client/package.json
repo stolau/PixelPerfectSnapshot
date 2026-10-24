@@ -1,6 +1,6 @@
 {
   "name": "pixelperfectsnapshot",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Capture DOM snapshots in e2e tests and upload them to a PixelPerfectSnapshot backend",
   "license": "MIT",
   "repository": {
