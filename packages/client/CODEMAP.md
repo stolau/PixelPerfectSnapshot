@@ -17,6 +17,7 @@ describe no single file.
 `npm run build` (tsc → `dist/`, then `scripts/bundle.mjs`) · `npm run lint` (typecheck) ·
 `npm test` (pretest installs Chromium via `playwright install chromium`, then build, then vitest —
 browser tests need the built `dist/` bundles) · `prepare` runs the build, so a root `npm ci`
-produces `dist/` automatically. Package `exports` exposes only `"."` — subpath types would lie
-because `scripts/bundle.mjs` overwrites tsc's `dist/capture.js`/`dist/rehydrate.js` while their
-`.d.ts` siblings remain.
+produces `dist/` automatically. Package `exports` exposes `"."` and `"./bundle"` (the Node-only
+bundle writer, `dist/bundle-node.js`). There is no `./capture` or `./rehydrate` subpath — their types
+would lie because `scripts/bundle.mjs` overwrites tsc's `dist/capture.js`/`dist/rehydrate.js` while
+their `.d.ts` siblings remain.
