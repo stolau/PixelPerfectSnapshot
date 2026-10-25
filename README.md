@@ -10,7 +10,7 @@ pixel-diff them against human-approved baselines on a server, review and approve
 | `packages/client/` | npm library installed into target projects; captures and uploads snapshots | TypeScript |
 | `backend/` | receives snapshots, re-renders, pixel-diffs against baselines | Python / Flask |
 | `viewer/` | web UI for runs, diffs, and baseline approval | React + Vite + TypeScript |
-| `docs/` | the frozen contracts: [snapshot format](docs/SNAPSHOT_FORMAT.md) · [HTTP API](docs/API.md) · [self-hosting](docs/SELF_HOSTING.md) |
+| `docs/` | the frozen contracts: [snapshot format](docs/SNAPSHOT_FORMAT.md) · [HTTP API](docs/API.md) · [self-hosting](docs/SELF_HOSTING.md) · [run bundle format](docs/BUNDLE_FORMAT.md) |
 
 The per-file code map lives on this project's ProbaImpera server (see `PROBAIMPERA.md`); each
 package's `CODEMAP.md` now keeps only its commands.
