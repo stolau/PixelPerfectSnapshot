@@ -91,7 +91,8 @@ await writeBundle([snapshot], "run.zip");
 ```
 
 The client bundle holds snapshot documents only: `run` and every `status` are `null`. It rejects,
-before writing anything, duplicate snapshot names, a snapshot with `when` but no `spec`, and a
+before writing anything, duplicate snapshot names, a snapshot with `when` but no `spec`, a name,
+category, spec or when outside the snapshot format's shapes, a non-integer or zero viewport, and a
 bundle beyond zip32 (more than 65535 entries or 4 GiB). The server produces the same format with
 images and statuses for an uploaded run; see `GET /api/runs/<run_id>/export.zip` in
 [docs/API.md](https://github.com/stolau/PixelPerfectSnapshot/blob/main/docs/API.md).
