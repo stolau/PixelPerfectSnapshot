@@ -1803,6 +1803,31 @@ def test_export_zip_structure_diff_only_while_fail(client, tmp_path):
     assert "diff" in entry["files"]
 
 
+def test_structure_diff_null_after_approving_a_failed_snapshot(client, tmp_path):
+    run_id = create_run(client)
+    example = load_example()
+    upload_snapshot(client, run_id, example)
+    write_candidate_bytes(tmp_path, run_id, example["name"], (1, 2, 3))
+    written = write_structure_diff(tmp_path, run_id, example["name"])
+    set_snapshot_status(tmp_path, run_id, example["name"], "fail")
+    url = f"/api/runs/{run_id}/snapshots/{example['name']}"
+
+    body = client.get(url).get_json()
+    assert body["status"] == "fail"
+    assert body["structureDiff"] == json.loads(written)
+
+    response = client.post(f"{url}/approve")
+    assert response.status_code == 200
+
+    body = client.get(url).get_json()
+    assert body["status"] == "pass"
+    assert body["structureDiff"] is None
+    diff_file = render.structure_path(
+        tmp_path, run_id, snapshot_id_of(tmp_path, run_id, example["name"]), "structure-diff"
+    )
+    assert diff_file.exists()
+
+
 def test_export_zip_category_from_db_spec_when_from_blob(client, tmp_path):
     run_id = create_run(client)
     example = load_example()
