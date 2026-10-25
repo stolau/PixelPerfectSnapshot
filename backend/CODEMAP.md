@@ -23,3 +23,7 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 
 `process-pending` needs the built client artifact (`npm ci && npm run build -w packages/client` at
 the repo root) and an installed browser (`.venv/bin/playwright install chromium`).
+
+In a git worktree reusing the main checkout's venv, run tests from the worktree's `backend/` as
+`<main checkout>/backend/.venv/bin/python -m pytest`, never bare `.venv/bin/pytest`: the venv's
+editable install maps `app` to the main checkout, so bare `pytest` tests main, not the worktree.
