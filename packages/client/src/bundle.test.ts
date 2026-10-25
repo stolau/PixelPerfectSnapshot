@@ -146,6 +146,104 @@ test("writeBundle refuses duplicate names and when without spec", async () => {
   expect(existsSync(noSpec)).toBe(false);
 });
 
+function schemas() {
+  const ajv = new Ajv2020({ allErrors: true, strict: false });
+  const snapshotSchema = JSON.parse(readFileSync(snapshotSchemaPath, "utf8"));
+  const bundleSchema = JSON.parse(readFileSync(bundleSchemaPath, "utf8"));
+  return {
+    snapshotSchema,
+    bundleSchema,
+    validateSnapshot: ajv.compile(snapshotSchema),
+    validateManifest: ajv.compile(bundleSchema),
+  };
+}
+
+/** Writes the bundle; answers true when written, false when refused as a shape. */
+async function writes(snapshots: Snapshot[], file: string): Promise<boolean> {
+  try {
+    await writeBundle(snapshots, file);
+    return true;
+  } catch (e) {
+    expect(String(e)).toMatch(/writeBundle: snapshot/);
+    expect(existsSync(file)).toBe(false);
+    return false;
+  }
+}
+
+test("writeBundle refuses exactly the tag shapes snapshot.schema.json refuses", async () => {
+  const { snapshotSchema, validateSnapshot, validateManifest } = schemas();
+  const known = new Set(["type", "minLength", "maxLength", "pattern"]);
+  let n = 0;
+  for (const field of ["name", "category", "spec", "when"] as const) {
+    const prop = snapshotSchema.properties[field];
+    // A keyword added to the schema must turn this red, not go unchecked.
+    for (const k of Object.keys(prop)) expect(known.has(k), `${field}.${k}`).toBe(true);
+    expect(prop.type).toBe("string");
+    const min: number = prop.minLength;
+    const max: number = prop.maxLength;
+    const cases: [string, string][] = [
+      ["min-1", "x".repeat(min - 1)],
+      ["min", "x".repeat(min)],
+      ["max ASCII", "x".repeat(max)],
+      ["max U+1F600", "\u{1F600}".repeat(max)],
+      ["max+1", "x".repeat(max + 1)],
+    ];
+    if (prop.pattern !== undefined) cases.push(["a/b", "a/b"]);
+    for (const [label, value] of cases) {
+      const extra: Partial<Snapshot> = { spec: "s", [field]: value };
+      const doc = field === "name" ? snap(value, extra) : snap("n", extra);
+      const valid = validateSnapshot(doc) as boolean;
+      const file = path.join(tmp, `shape-${n++}.zip`);
+      const written = await writes([snap("ok"), doc], file);
+      expect(written, `${field} ${label}: schema says ${valid ? "valid" : "invalid"}`).toBe(valid);
+      if (!written) continue;
+      const entries = readZip(readFileSync(file));
+      const manifest = JSON.parse(entries.get("manifest.json")!.toString("utf8"));
+      expect(validateManifest(manifest), `${field} ${label}: ${JSON.stringify(validateManifest.errors)}`).toBe(true);
+      for (const entry of manifest.snapshots) {
+        const written = JSON.parse(entries.get(entry.files.snapshot)!.toString("utf8"));
+        expect(validateSnapshot(written), `${field} ${label}`).toBe(true);
+      }
+    }
+  }
+});
+
+test("writeBundle refuses a viewport the manifest schema refuses", async () => {
+  const { validateManifest } = schemas();
+  let n = 0;
+  for (const side of ["width", "height"] as const) {
+    for (const v of [0, 0.5, 1, 1.5]) {
+      const doc = snap("v");
+      doc.viewport = { ...doc.viewport, [side]: v };
+      const manifest = {
+        bundleVersion: 0,
+        producer: "client",
+        run: null,
+        snapshots: [
+          {
+            name: "v",
+            viewport: doc.viewport,
+            category: null,
+            spec: null,
+            when: null,
+            status: null,
+            files: { snapshot: "snapshots/0001/snapshot.json" },
+          },
+        ],
+      };
+      const valid = validateManifest(manifest) as boolean;
+      const written = await writes([doc], path.join(tmp, `viewport-${n++}.zip`));
+      expect(written, `${side} ${v}: schema says ${valid ? "valid" : "invalid"}`).toBe(valid);
+    }
+  }
+});
+
+test("a refused bundle writes no file", async () => {
+  const file = path.join(tmp, "refused.zip");
+  await expect(writeBundle([snap("ok"), snap("a/b")], file)).rejects.toThrow(/writeBundle: snapshot/);
+  expect(existsSync(file)).toBe(false);
+});
+
 test("zip refuses more than 65535 entries", () => {
   const tiny = Buffer.from("x");
   const make = (n: number) => Array.from({ length: n }, (_, i) => ({ name: `e${i}`, data: tiny }));
