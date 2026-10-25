@@ -33,10 +33,21 @@ npm run test:e2e -w examples/demo-app
 The test resolves the flask binary as: `PPS_FLASK` env var → `backend/.venv/bin/flask` →
 `flask` on PATH, and fails fast with the setup instructions above when the flask binary can't
 start. `npm test` here is a stub (no unit tests) so the root workspace test run stays green
-without Python.
+without Python. A direct `vitest run` skips the `pretest:e2e` viewer build and fails; use the
+npm script.
 
-To also dogfood a real, persistent, already-deployed instance while the suite runs (see
-"Dogfooding" above):
+In a git worktree (e.g. `.claude/worktrees/<card>`), either run the prerequisites above inside it
+(its own venv, slower) or, after only `npm ci`, reuse the main checkout's venv:
+
+```sh
+MAIN=$(git worktree list | head -1 | cut -d' ' -f1)   # the main checkout
+PPS_FLASK=$MAIN/backend/.venv/bin/flask npm run test:e2e -w examples/demo-app
+```
+
+flask runs with this worktree's `backend/` as cwd, so the worktree's `app` is the one under test.
+For backend tests the same way, see `backend/CODEMAP.md`.
+
+To also dogfood a real, persistent, already-deployed instance while the suite runs:
 
 ```sh
 PPS_DOGFOOD_SERVER_URL=https://your-backend [PPS_DOGFOOD_TOKEN=...] \
