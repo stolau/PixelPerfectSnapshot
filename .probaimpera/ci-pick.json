@@ -1,33 +1,23 @@
 {
- "base": "f09994440c1b8a8dd84ab4fa4e7d8b842a43792c",
- "diff": "1fee342e0f0294864f8ef0c97cd6d8e4232c372deee9e52b8a5283d406db3b1a",
+ "base": "77b79ddb0fc909db8d36f62fe3f0148cfd18c2d0",
+ "diff": "66c2874a5d4d4cb0916560480412992f1c40b51dec4a8ecdfd806434bbd11b69",
  "floor": [],
- "mode": "all",
+ "mode": "selected",
  "paths": [
-  ".github/workflows/ci.yml",
   "README.md",
-  "backend/app/api.py",
+  "backend/CODEMAP.md",
   "backend/tests/test_api.py",
-  "backend/tests/test_auth.py",
-  "backend/tests/test_bundle_schema.py",
-  "docs/API.md",
-  "docs/BUNDLE_FORMAT.md",
-  "docs/SNAPSHOT_FORMAT.md",
-  "docs/bundle.schema.json",
-  "docs/snapshot.schema.json",
+  "examples/demo-app/CODEMAP.md",
+  "packages/client/CODEMAP.md",
   "packages/client/README.md",
-  "packages/client/package.json",
-  "packages/client/scripts/bundle.mjs",
-  "packages/client/src/blocking.test.ts",
   "packages/client/src/bundle.test.ts",
-  "packages/client/src/bundle.ts",
-  "packages/client/src/capture.ts",
-  "packages/client/src/global.ts",
-  "packages/client/src/index.ts",
-  "packages/client/src/roundtrip.test.ts",
-  "packages/client/src/zip.ts"
+  "packages/client/src/bundle.ts"
  ],
- "reason": ".github/workflows/ci.yml: a package manifest, lockfile, or runner or CI config; .github/workflows/ci.yml: not in the index at f09994440c1b, so it cannot be placed; packages/client/package.json: a package manifest, lockfile, or runner or CI config; packages/client/package.json: not in the index at f09994440c1b, so it cannot be placed; packages/client/scripts/bundle.mjs: nothing imports it, so what loads it is not read",
+ "reason": null,
  "rules": "948.1",
- "tests": []
+ "tests": [
+  "backend/tests/test_api.py",
+  "examples/demo-app/e2e.test.ts",
+  "packages/client/src/bundle.test.ts"
+ ]
 }
